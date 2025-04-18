@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.6
 // @description  Nonogram overlay for Twitch with config cycling, clipboard export, light background and styled buttons. Configs can be saved/loaded/deleted. Uses a single 'size' config. Background is lightly translucent white for better visibility on stream overlays or dark themes. Buttons are placed bottom-right next to config button for easy access.
-// @author       chatgpt+Pantera+Me
+// @author       chatgpt+mrpantera_666+Menels
 // @match        https://www.twitch.tv/gokiccoon*
 // @grant        none
 // @run-at       document-idle
