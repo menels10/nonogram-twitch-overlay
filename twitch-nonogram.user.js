@@ -7,7 +7,7 @@
 // @match        https://www.twitch.tv/gokiccoon*
 // @grant        none
 // @run-at       document-idle
-// @downloadURL  https://yourusername.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
+// @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
 // ==/UserScript==
 
 (function () {
