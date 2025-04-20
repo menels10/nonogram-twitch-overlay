@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid (v1.6)
+// @name         Twitch Nonogram Grid (v1.7)
 // @namespace    http://tampermonkey.net/
-// @version      1.6
-// @description  Nonogram overlay for Twitch with config cycling, clipboard export, light background and styled buttons. Configs can be saved/loaded/deleted. Uses a single 'size' config. Background is lightly translucent white for better visibility on stream overlays or dark themes. Buttons are placed bottom-right next to config button for easy access.
-// @author       chatgpt+mrpantera_666+Menels
-// @match        https://www.twitch.tv/gokiccoon*
+// @version      1.7
+// @description  Nonogram overlay for Twitch with dynamic sizing based on puzzle size, clue counts, and scale factor. Configs can be cycled, saved, loaded, and deleted. Two extra buttons let you adjust the number of clues (row+column) at the top‑right of the grid. Cell size auto‑calculates based on available space, puzzle size, clue counts, and an optional multiplier for smaller windows.
+// @author       mr_pantera666, Menels and even more chatGPT
+// @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-idle
 // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
@@ -13,309 +13,353 @@
 (function () {
     'use strict';
 
+    // persisted configs
     let configs = JSON.parse(localStorage.getItem('nonogramConfigs')) || {};
-    let currentConfig = configs.default || { size: 10, cellSize: 30, gridX: 50, gridY: 50 };
-    let { size, cellSize, gridX, gridY } = currentConfig;
-    let isDragging = false;
-    let offsetX, offsetY;
-    let previousBlackCells = new Set();
-    let configNames = Object.keys(configs);
-    let currentConfigIndex = configNames.indexOf('default') >= 0 ? configNames.indexOf('default') : 0;
+    let currentConfigName = 'default';
+    let currentConfig = configs[currentConfigName] || {
+        size:        4,     // puzzle size
+        gridX:      340,    // px from window’s right edge
+        gridY:      240,    // px from window’s bottom edge
+        clueCount:   1,     // number of clues
+        multiplier: 0.421   // the scale you’re already using
+    };
+    let { size, gridX, gridY, clueCount, multiplier } = currentConfig;
 
-    let nextButton, prevButton;
+    // state
+    let isDragging = false,
+        offsetX, offsetY,
+        previousBlackCells = new Set();
 
+    // UI elements
+    let nextSizeBtn, prevSizeBtn,
+        nextClueBtn, prevClueBtn,
+        clueBtnContainer, buttonContainer, configPanel;
+
+    // save configs
     function saveConfig(name) {
-        configs[name] = { size, cellSize, gridX, gridY };
+        configs[name] = { size, gridX, gridY, clueCount, multiplier };
         localStorage.setItem('nonogramConfigs', JSON.stringify(configs));
         populateConfigDropdown();
-        configNames = Object.keys(configs);
     }
 
     function deleteConfig(name) {
-        if (configs[name]) {
-            delete configs[name];
-            localStorage.setItem('nonogramConfigs', JSON.stringify(configs));
-            populateConfigDropdown();
-            configNames = Object.keys(configs);
-            if (configNames.length > 0) {
-                loadConfig(configNames[0]);
-            } else {
+        delete configs[name];
+        localStorage.setItem('nonogramConfigs', JSON.stringify(configs));
+        populateConfigDropdown();
+        if (name === currentConfigName) {
+            let keys = Object.keys(configs);
+            if (keys.length) loadConfig(keys[0]);
+            else {
+                localStorage.removeItem('nonogramConfigs');
                 location.reload();
             }
         }
     }
 
     function loadConfig(name) {
-        configNames = Object.keys(configs);
-        currentConfigIndex = configNames.indexOf(name);
-        if (configs[name]) {
-            ({ size, cellSize, gridX, gridY } = configs[name]);
-            createGrid();
-        }
-    }
-
-    function loadNextConfig() {
-        configNames = Object.keys(configs);
-        if (configNames.length === 0) return;
-        currentConfigIndex = (currentConfigIndex + 1) % configNames.length;
-        loadConfig(configNames[currentConfigIndex]);
-    }
-
-    function loadPreviousConfig() {
-        configNames = Object.keys(configs);
-        if (configNames.length === 0) return;
-        currentConfigIndex = (currentConfigIndex - 1 + configNames.length) % configNames.length;
-        loadConfig(configNames[currentConfigIndex]);
+        currentConfigName = name;
+        let c = configs[name];
+        ({ size, gridX, gridY, clueCount, multiplier } = c);
+        createGrid();
+        updateButtonPositions();
+        updateClueButtonPositions();
     }
 
     function populateConfigDropdown() {
-        let configDropdown = document.getElementById('configList');
-        if (!configDropdown) return;
-        configDropdown.innerHTML = '';
-        Object.keys(configs).forEach(name => {
-            let option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            configDropdown.appendChild(option);
-        });
+        let sel = document.getElementById('configList');
+        if (!sel) return;
+        sel.innerHTML = '';
+        for (let k of Object.keys(configs)) {
+            let o = document.createElement('option');
+            o.value = k;
+            o.textContent = k;
+            sel.appendChild(o);
+        }
+        sel.value = currentConfigName;
     }
 
-    function createGrid() {
-        previousBlackCells = new Set();
-        let grid = document.getElementById('nonogram-grid');
-        if (grid) grid.remove();
 
-        grid = document.createElement('div');
+    // grid creation
+    function createGrid() {
+        // remove old grid
+        let old = document.getElementById('nonogram-grid');
+        if (old) old.remove();
+
+        // auto‑compute cellSize based on window & clueCount & multiplier
+        // measure a single clue‐digit ("0") in the current page font
+        let meas = document.createElement('span');
+        meas.textContent = '0';
+        meas.style.position   = 'absolute';
+        meas.style.visibility = 'hidden';
+        meas.style.padding    = '0';
+        meas.style.margin     = '0';
+        // if you use a specific font‐size or font‐family for your clues,
+        // you can set meas.style.font = '14px sans‑serif' here to match it.
+        document.body.appendChild(meas);
+        const clueW = meas.getBoundingClientRect().width;
+        const clueH = meas.getBoundingClientRect().height;
+        document.body.removeChild(meas);
+
+        // now compute exactly like Python:
+        let headerSpace = 25;  // extra padding around the clues
+        let leftClueW   = clueCount * clueW + headerSpace;
+        let topClueH    = clueCount * clueH + headerSpace;
+
+        // and use your real border thickness
+        const OUTER_BORDER = 2;
+        let margin = 15;
+        let availW = window.innerWidth  - leftClueW - 2*margin - OUTER_BORDER*2;
+        let availH = window.innerHeight - topClueH  - 2*margin - OUTER_BORDER*2;
+
+        let baseCell  = Math.floor(Math.min(availW / size, availH / size));
+        let cellSize  = Math.max(1, Math.floor(baseCell * multiplier));
+
+        // build grid container
+        let grid = document.createElement('div');
         grid.id = 'nonogram-grid';
         grid.style.position = 'fixed';
-        grid.style.top = `${gridY}px`;
-        grid.style.left = `${gridX}px`;
-        grid.style.display = 'grid';
+        grid.style.right    = `${gridX}px`;
+        grid.style.bottom   = `${gridY}px`;
+        grid.style.left     = 'auto';
+        grid.style.top      = 'auto';
+        grid.style.display  = 'grid';
         grid.style.gridTemplateColumns = `repeat(${size}, ${cellSize}px)`;
-        grid.style.gridTemplateRows = `repeat(${size}, ${cellSize}px)`;
-        grid.style.zIndex = '10000';
-        grid.style.border = '4px solid cyan';
-        grid.style.cursor = 'move';
-        grid.style.padding = '2px';
-        grid.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        grid.style.gridTemplateRows    = `repeat(${size}, ${cellSize}px)`;
+        grid.style.border   = '2px solid cyan';
+        grid.style.boxSizing = 'border-box';
+        grid.style.backgroundColor = 'rgba(255,255,255,0.1)';
+        grid.style.cursor   = 'move';
+        grid.style.zIndex   = '10000';
 
         document.body.appendChild(grid);
 
-        for (let row = 0; row < size; row++) {
-            for (let col = 0; col < size; col++) {
+        // cells
+        for (let r = 0; r < size; r++) {
+            for (let c = 0; c < size; c++) {
                 let cell = document.createElement('div');
-                cell.style.width = `${cellSize}px`;
-                cell.style.height = `${cellSize}px`;
-                cell.style.border = '1px solid rgba(0,255,255,0.2)';
-                cell.style.backgroundColor = 'transparent';
-                cell.style.pointerEvents = 'auto';
-                cell.dataset.row = row;
-                cell.dataset.col = col;
+                cell.style.boxSizing = 'border-box';    // ← include border in these dims
+                cell.style.width     = `${cellSize}px`;
+                cell.style.height    = `${cellSize}px`;
+                cell.style.border    = '1px solid rgba(0,255,255,0.3)';
+                cell.dataset.row = r;
+                cell.dataset.col = c;
 
-                cell.addEventListener('click', () => {
-                    cell.style.backgroundColor = 'black';
-                });
-
-                cell.addEventListener('contextmenu', (e) => {
+                cell.addEventListener('click', () => cell.style.backgroundColor = 'black');
+                cell.addEventListener('contextmenu', e => {
                     e.preventDefault();
-                    if (cell.style.backgroundColor === 'white') {
-                        cell.style.backgroundColor = 'transparent';
-                    } else {
-                        cell.style.backgroundColor = 'white';
-                    }
+                    cell.style.backgroundColor =
+                        cell.style.backgroundColor === 'white' ? 'transparent' : 'white';
                 });
 
                 grid.appendChild(cell);
             }
         }
 
-        makeGridDraggable(grid);
-        createButtons();
-        updateSizeButtonLabels();
+        makeDraggable(grid);
+        createMainButtons();
+        createClueButtons();
+        updateButtonPositions();
+        updateClueButtonPositions();
     }
 
-    function makeGridDraggable(grid) {
-        grid.addEventListener('mousedown', (e) => {
-            if (e.target === grid) {
-                isDragging = true;
-                offsetX = e.clientX - grid.offsetLeft;
-                offsetY = e.clientY - grid.offsetTop;
-                grid.style.pointerEvents = 'none';
-            }
-        });
+    // dragging
+function makeDraggable(el) {
+    let dragOffsetX, dragOffsetY;
 
-        document.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                gridX = e.clientX - offsetX;
-                gridY = e.clientY - offsetY;
-                grid.style.left = `${gridX}px`;
-                grid.style.top = `${gridY}px`;
-                updateButtonPosition();
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            isDragging = false;
-            grid.style.pointerEvents = 'auto';
-        });
-    }
-
-    function createButtons() {
-        let buttonContainer = document.getElementById('button-container');
-        if (!buttonContainer) {
-            buttonContainer = document.createElement('div');
-            buttonContainer.id = 'button-container';
-            buttonContainer.style.position = 'fixed';
-            buttonContainer.style.zIndex = '10001';
-            buttonContainer.style.fontSize = "16px";
-            buttonContainer.style.color = "white";
-            buttonContainer.style.backgroundColor = "#007BFF";
-            buttonContainer.style.padding = "4px";
-            buttonContainer.style.display = "flex";
-            buttonContainer.style.gap = "4px";
-            document.body.appendChild(buttonContainer);
+    el.addEventListener('mousedown', e => {
+        if (e.target === el) {
+            isDragging = true;
+            const rect = el.getBoundingClientRect();
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
+            el.style.pointerEvents = 'none';
         }
+    });
 
-        buttonContainer.innerHTML = '';
+    document.addEventListener('mousemove', e => {
+        if (!isDragging) return;
+        // compute the top‑left corner of the grid
+        const newLeft = e.clientX - dragOffsetX;
+        const newTop  = e.clientY - dragOffsetY;
+        const rect    = el.getBoundingClientRect();
 
-        const makeStyledButton = (id, label, handler) => {
-            let btn = document.createElement('button');
-            btn.id = id;
-            btn.textContent = label;
-            btn.style.padding = '6px 10px';
-            btn.style.fontSize = '14px';
-            btn.style.cursor = 'pointer';
-            btn.style.border = 'none';
-            btn.style.backgroundColor = '#0056b3';
-            btn.style.color = 'white';
-            btn.style.borderRadius = '4px';
-            btn.addEventListener('click', handler);
-            buttonContainer.appendChild(btn);
-            return btn;
+        // now compute how far we are from right/bottom edges
+        gridX = window.innerWidth  - (newLeft + rect.width);
+        gridY = window.innerHeight - (newTop  + rect.height);
+
+        // apply those as right/bottom
+        el.style.right  = `${gridX}px`;
+        el.style.bottom = `${gridY}px`;
+        // clear any left/top overrides
+        el.style.left   = 'auto';
+        el.style.top    = 'auto';
+
+        updateButtonPositions();
+        updateClueButtonPositions();
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        el.style.pointerEvents = 'auto';
+    });
+}
+
+    // main buttons: export, config, size prev/next
+    function createMainButtons() {
+        if (buttonContainer) buttonContainer.remove();
+        buttonContainer = document.createElement('div');
+        buttonContainer.id = 'button-container';
+        Object.assign(buttonContainer.style, {
+            position: 'fixed', zIndex: '10001', display: 'flex', gap: '4px'
+        });
+        document.body.appendChild(buttonContainer);
+
+        const btn = (id, text, cb) => {
+            let b = document.createElement('button');
+            b.id = id;
+            b.textContent = text;
+            Object.assign(b.style, {
+                padding: '4px 8px', background: '#0056b3', color: 'white',
+                border: 'none', borderRadius: '3px', cursor: 'pointer'
+            });
+            b.addEventListener('click', cb);
+            buttonContainer.appendChild(b);
+            return b;
         };
 
-        makeStyledButton('export-button', 'Export Black Cells', exportBlackCells);
-        makeStyledButton('config-button', '⚙️ Config', toggleConfigPanel);
-        nextButton = makeStyledButton('next-config-button', '', loadNextConfig);
-        prevButton = makeStyledButton('prev-config-button', '', loadPreviousConfig);
+        btn('export-btn', 'Export ✓', exportBlackCells);
+        btn('config-btn', '⚙️', toggleConfigPanel);
 
-        updateButtonPosition();
+        prevSizeBtn = btn('prev-size-btn', `←${size-1}`, () => { size=Math.max(1,size-1); saveConfig(currentConfigName); createGrid(); });
+        nextSizeBtn = btn('next-size-btn', `${size+1}→`, () => { size=size+1; saveConfig(currentConfigName); createGrid(); });
+
+        createConfigPanel();
     }
 
-    function updateSizeButtonLabels() {
-        if (nextButton) {
-            nextButton.textContent = `${size + 1}`;
-            nextButton.style.backgroundColor = '#007BFF';
-        }
-        if (prevButton) {
-            prevButton.textContent = `${Math.max(1, size - 1)}`;
-            prevButton.style.backgroundColor = '#007BFF';
-        }
+    function updateButtonPositions() {
+        const rect = document
+        .getElementById('nonogram-grid')
+        .getBoundingClientRect();
+        buttonContainer.style.left = `${rect.left}px`;
+        buttonContainer.style.top  = `${rect.bottom + 8}px`;
+        prevSizeBtn.textContent     = `${size > 1 ? size - 1 : 1}`;
+        nextSizeBtn.textContent     = `${size + 1}`;
     }
 
-    function updateButtonPosition() {
-        let buttonContainer = document.getElementById('button-container');
-        if (buttonContainer) {
-            buttonContainer.style.top = `${gridY + size * cellSize + 10}px`;
-            buttonContainer.style.left = `${gridX}px`;
-        }
+    // clue buttons: top‑right outside grid
+    function createClueButtons() {
+        if (clueBtnContainer) clueBtnContainer.remove();
+        clueBtnContainer = document.createElement('div');
+        clueBtnContainer.id = 'clue-button-container';
+        Object.assign(clueBtnContainer.style, {
+            position: 'fixed', zIndex: '10001', display: 'flex', gap: '4px'
+        });
+        document.body.appendChild(clueBtnContainer);
+
+        const cb = (id, cb) => {
+            let b = document.createElement('button');
+            b.id = id;
+            Object.assign(b.style, {
+                padding: '4px 6px', background: '#007BFF', color: 'white',
+                border: 'none', borderRadius: '3px', cursor: 'pointer'
+            });
+            b.addEventListener('click', cb);
+            clueBtnContainer.appendChild(b);
+            return b;
+        };
+
+        prevClueBtn = cb('prev-clue-btn', () => { clueCount = Math.max(1, clueCount-1); saveConfig(currentConfigName); createGrid(); });
+        nextClueBtn = cb('next-clue-btn', () => { clueCount = clueCount+1; saveConfig(currentConfigName); createGrid(); });
+
+        updateClueButtonLabels();
     }
 
+    function updateClueButtonPositions() {
+        const rect = document
+        .getElementById('nonogram-grid')
+        .getBoundingClientRect();
+        clueBtnContainer.style.left = `${rect.right + 8}px`;
+        clueBtnContainer.style.top  = `${rect.top}px`;
+        updateClueButtonLabels();
+    }
+
+    function updateClueButtonLabels() {
+        prevClueBtn.textContent = `Clues– ${clueCount}`;
+        nextClueBtn.textContent = `${clueCount} –Clues+`;
+    }
+
+    // export black cells
     function exportBlackCells() {
         let grid = document.getElementById('nonogram-grid');
-        let cells = grid.children;
-        let newBlackCells = new Set();
-
-        for (let cell of cells) {
+        if (!grid) return;
+        let black = [];
+        for (let cell of grid.children) {
             if (cell.style.backgroundColor === 'black') {
-                let row = parseInt(cell.dataset.row) + 1;
-                let col = String.fromCharCode(97 + parseInt(cell.dataset.col));
-                newBlackCells.add(`${col}${row}`);
+                let r = +cell.dataset.row + 1;
+                let c = String.fromCharCode(97 + (+cell.dataset.col));
+                black.push(`${c}${r}`);
             }
         }
-
-        let added = [...newBlackCells].filter(x => !previousBlackCells.has(x));
-        let removed = [...previousBlackCells].filter(x => !newBlackCells.has(x));
-
-        if (added.length > 0) {
-            copyToClipboard(`!fill ${added.join(' ')}`);
-        } else if (removed.length > 0) {
-            copyToClipboard(`!empty ${removed.join(' ')}`);
-        }
-
-        previousBlackCells = newBlackCells;
+        if (!black.length) return;
+        navigator.clipboard.writeText(`!fill ${black.join(' ')}`);
     }
 
-    function copyToClipboard(text) {
-        navigator.clipboard.writeText(text).catch(err => {
-            console.error('Clipboard copy failed:', err);
-        });
-    }
-
+    // config panel
     function createConfigPanel() {
-        let panel = document.getElementById('config-panel');
-        if (panel) panel.remove();
-
-        panel = document.createElement('div');
-        panel.id = 'config-panel';
-        panel.style.position = 'fixed';
-        panel.style.top = '10px';
-        panel.style.left = '10px';
-        panel.style.background = 'white';
-        panel.style.color = 'black';
-        panel.style.padding = '10px';
-        panel.style.border = '1px solid black';
-        panel.style.zIndex = '10001';
-        panel.style.display = 'none';
-
-        panel.innerHTML = `
-            <label>Size: <input id="size" type="number" value="${size}" /></label><br>
-            <label>Cell Size: <input id="cellSize" type="number" value="${cellSize}" /></label><br>
-            <label>Save As: <input id="configName" type="text" /></label><br>
-            <label>Load Config: <select id="configList"></select></label><br>
-            <button id="apply-config">Apply</button>
-            <button id="save-config">Save</button>
-            <button id="load-config">Load</button>
-            <button id="delete-config">Delete</button>
+        if (configPanel) return;
+        configPanel = document.createElement('div');
+        configPanel.id = 'config-panel';
+        Object.assign(configPanel.style, {
+            position: 'fixed', top:'10px', left:'10px',
+            background:'#fff', color:'#000', padding:'8px',
+            border:'1px solid #000', zIndex:'10002', display:'none'
+        });
+        configPanel.innerHTML = `
+            <label>Size: <input id="cfg-size" type="number" value="${size}" min="1"/></label><br/>
+            <label>Clues: <input id="cfg-clues" type="number" value="${clueCount}" min="1"/></label><br/>
+            <label>Scale: <input id="cfg-mult" type="number" step="0.1" value="${multiplier}" min="0.1"/></label><br/>
+            <label>Save As: <input id="cfg-name" type="text" placeholder="name"/></label><br/>
+            <label>Load: <select id="configList"></select></label><br/>
+            <button id="apply-btn">Apply</button>
+            <button id="save-btn">Save</button>
+            <button id="load-btn">Load</button>
+            <button id="del-btn">Delete</button>
         `;
-
-        document.body.appendChild(panel);
+        document.body.appendChild(configPanel);
         populateConfigDropdown();
 
-        document.getElementById('apply-config').addEventListener('click', () => {
-            size = parseInt(document.getElementById('size').value);
-            cellSize = parseInt(document.getElementById('cellSize').value);
+        document.getElementById('apply-btn').onclick = () => {
+            size       = +document.getElementById('cfg-size').value;
+            clueCount  = +document.getElementById('cfg-clues').value;
+            multiplier = +document.getElementById('cfg-mult').value;
+            currentConfigName = document.getElementById('configList').value || currentConfigName;
+            saveConfig(currentConfigName);
             createGrid();
-        });
-
-        document.getElementById('save-config').addEventListener('click', () => {
-            let name = document.getElementById('configName').value || 'default';
+        };
+        document.getElementById('save-btn').onclick = () => {
+            let name = document.getElementById('cfg-name').value.trim() || prompt('Config name?');
+            if (!name) return;
             saveConfig(name);
-        });
-
-        document.getElementById('load-config').addEventListener('click', () => {
-            let name = document.getElementById('configList').value || 'default';
-            loadConfig(name);
-        });
-
-        document.getElementById('delete-config').addEventListener('click', () => {
+        };
+        document.getElementById('load-btn').onclick = () => {
             let name = document.getElementById('configList').value;
-            if (name && confirm(`Delete config "${name}"?`)) {
-                deleteConfig(name);
-            }
-        });
+            if (!name) return;
+            loadConfig(name);
+        };
+        document.getElementById('del-btn').onclick = () => {
+            let name = document.getElementById('configList').value;
+            if (name && confirm(`Delete config "${name}"?`)) deleteConfig(name);
+        };
     }
 
     function toggleConfigPanel() {
-        let panel = document.getElementById('config-panel');
-        if (panel) {
-            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-        }
+        configPanel.style.display =
+            configPanel.style.display === 'none' ? 'block' : 'none';
     }
 
+    // init
     window.addEventListener('load', () => {
         createGrid();
-        createConfigPanel();
-        window.toggleConfigPanel = toggleConfigPanel;
     });
+
 })();
