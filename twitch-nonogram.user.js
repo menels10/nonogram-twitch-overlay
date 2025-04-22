@@ -21,7 +21,7 @@
         gridY:         240,
         rowClueCount:  2,
         colClueCount:  2,
-        ratio:         1.0
+        ratio:         0.7
     };
 
     // Load stored configs or defaults
@@ -300,8 +300,14 @@
     }
 
     // Initialization
-    window.addEventListener('load', () => {
+    if (document.readyState === 'complete') {
+      createGrid();
+      createConfigPanel();
+    } else {
+      window.addEventListener('load', () => {
         createGrid();
         createConfigPanel();
-    });
+      });
+    }
+
 })();
