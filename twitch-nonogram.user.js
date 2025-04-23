@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid (v1.7)
+// @name         Twitch Nonogram Grid (v1.9)
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.9
 // @description  Nonogram overlay for Twitch. Buttons allow you to adjust size and the number of clues (row+column) at the top‑right of the grid to create persistent configuration. Cell size can be adjusted by a scale factor and fine tuned. .
 // @author       mr_pantera666, Menels and a LOT of chatGPT
 // @match        https://www.twitch.tv/goki*
@@ -9,6 +9,7 @@
 // @run-at       document-idle
 // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
 // ==/UserScript==
+
 
 (function() {
     'use strict';
@@ -254,6 +255,7 @@
             Object.assign(row.style, { display: 'flex', gap: '4px', marginBottom: '8px' });
             sec.appendChild(row);
 
+            // – and + buttons
             [['–', s.dec], ['+', s.inc]].forEach(([sym, fn]) => {
                 const btn = document.createElement('button');
                 btn.textContent = sym;
@@ -268,6 +270,28 @@
                 btn.addEventListener('click', fn);
                 row.appendChild(btn);
             });
+
+            // reset-to-4×1×1 button for size section
+            if (s.key === 'size') {
+                const btn4 = document.createElement('button');
+                btn4.textContent = '4';
+                Object.assign(btn4.style, {
+                    width: '24px', height: '24px',
+                    border: '1px solid #000',
+                    borderRadius: '3px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    color: 'black'
+                });
+                btn4.addEventListener('click', () => {
+                    saveLayout();
+                    size = 4;
+                    rowClueCount = 1;
+                    colClueCount = 1;
+                    createGrid();
+                });
+                row.appendChild(btn4);
+            }
 
             controlContainer.appendChild(sec);
             if (i < allSections.length - 1) controlContainer.appendChild(document.createElement('hr'));
