@@ -421,5 +421,18 @@
         }
     }
 
-    window.addEventListener('load', createGrid);
+    // Unified initializer
+    function initNonogram() {
+      createGrid();
+      createConfigPanel();
+    }
+
+    // If page’s already ready, fire now; otherwise wait for load
+    if (document.readyState === 'complete' ||
+        document.readyState === 'interactive') {
+      initNonogram();
+    } else {
+      window.addEventListener('load', initNonogram);
+    }
+
 })();
