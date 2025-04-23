@@ -50,6 +50,8 @@
     }
 
     function createGrid() {
+        // — RESET THE EXPORT CACHE ON EVERY GRID REBUILD —
+        lastExported.clear();
         document.getElementById('nonogram-grid')?.remove();
         buttonContainer?.remove();
         controlContainer?.remove();
