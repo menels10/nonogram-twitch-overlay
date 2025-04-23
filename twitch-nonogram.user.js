@@ -3,10 +3,11 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.19.4
 // @description  Uses Python `render_nonogram` logic with ratio scaling, per-layout persistence, full config panel, per-cellSize fine tuning, toggleable scale/fine controls, import/export of configs, and reset-to-4×1×1 controls, with blue buttons aligned properly.
-// @author       You
-// @match        https://www.twitch.tv/goki*
-// @grant        none
-// @run-at       document-idle
+// @author       mr_pantera666, Menels and a LOT of chatGPT
+ // @match        https://www.twitch.tv/goki*
+ // @grant        none
+ // @run-at       document-idle
+ // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
 // ==/UserScript==
 
 (function() {
