@@ -2,163 +2,137 @@
 // @name         Twitch Nonogram Grid (v1.7)
 // @namespace    http://tampermonkey.net/
 // @version      1.7
-// @description  Nonogram overlay for Twitch with dynamic sizing based on puzzle size, clue counts, and scale factor. Configs can be cycled, saved, loaded, and deleted. Two extra buttons let you adjust the number of clues (row+column) at the top‑right of the grid. Cell size auto‑calculates based on available space, puzzle size, clue counts, and an optional multiplier for smaller windows.
-// @author       mr_pantera666, Menels and even more chatGPT
+// @description  Nonogram overlay for Twitch. Buttons allow you to adjust size and the number of clues (row+column) at the top‑right of the grid to create persistent configuration. Cell size can be adjusted by a scale factor and fine tuned. .
+// @author       mr_pantera666, Menels and a LOT of chatGPT
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-idle
 // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
 // ==/UserScript==
 
-
 (function() {
     'use strict';
 
-    // Default config
-    const DEFAULT_CONF = {
-        size:          5,
-        gridX:         340,
-        gridY:         240,
-        rowClueCount:  2,
-        colClueCount:  2,
-        ratio:         0.7
-    };
+    // Default config values
+    const DEFAULT_CONF = { ratio: 0.5, gridX: 340, gridY: 240, fineTune: 0 };
 
-    // Load stored configs or defaults
-    let configs = JSON.parse(localStorage.getItem('nonogramConfigs')) || {};
-    let currentConfigName = 'default';
-    if (!configs[currentConfigName]) configs[currentConfigName] = DEFAULT_CONF;
-    let { size, gridX, gridY, rowClueCount, colClueCount, ratio } = loadConfigValues(configs[currentConfigName]);
+    // Stored per-layout configs
+    let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
 
+    // Current grid parameters
+    let size = 5, rowClueCount = 2, colClueCount = 2;
+    let ratio = DEFAULT_CONF.ratio;
+    let gridX = DEFAULT_CONF.gridX, gridY = DEFAULT_CONF.gridY;
+    let fineTune = DEFAULT_CONF.fineTune;
+
+    // UI containers
     let buttonContainer, controlContainer, configPanel;
     let isDragging = false;
 
-    function loadConfigValues(c) {
-        return {
-            size:          c.size        ?? DEFAULT_CONF.size,
-            gridX:         c.gridX       ?? DEFAULT_CONF.gridX,
-            gridY:         c.gridY       ?? DEFAULT_CONF.gridY,
-            rowClueCount:  c.rowClueCount?? DEFAULT_CONF.rowClueCount,
-            colClueCount:  c.colClueCount?? DEFAULT_CONF.colClueCount,
-            ratio:         c.ratio       ?? DEFAULT_CONF.ratio
-        };
+    // Track which cells have already been exported
+    let lastExported = new Set();
+
+    // Unique key per layout
+    function getKey(sz, rc, cc) { return `${sz}x${rc}x${cc}`; }
+
+    // Load saved layout
+    function loadLayout() {
+        const key = getKey(size, rowClueCount, colClueCount);
+        const saved = configs[key];
+        if (saved) {
+            ratio = saved.ratio  ?? ratio;
+            fineTune = saved.fineTune ?? fineTune;
+            gridX    = saved.gridX   ?? gridX;
+            gridY    = saved.gridY   ?? gridY;
+        }
     }
 
-    function saveConfig(name) {
-        configs[name] = { size, gridX, gridY, rowClueCount, colClueCount, ratio };
-        localStorage.setItem('nonogramConfigs', JSON.stringify(configs));
-        populateConfigDropdown();
+    // Save current layout
+    function saveLayout() {
+        const key = getKey(size, rowClueCount, colClueCount);
+        configs[key] = { ratio, gridX, gridY, fineTune, size, rowClueCount, colClueCount };
+        localStorage.setItem('nonogramConfigMap', JSON.stringify(configs));
     }
 
-    function loadConfig(name) {
-        currentConfigName = name;
-        ({ size, gridX, gridY, rowClueCount, colClueCount, ratio } = loadConfigValues(configs[name]));
-        createGrid();
-    }
-
-    function deleteConfig(name) {
-        delete configs[name];
-        localStorage.setItem('nonogramConfigs', JSON.stringify(configs));
-        populateConfigDropdown();
-    }
-
-    // Create grid using Python logic + ratio only
+    // Create the grid and UI
     function createGrid() {
-        // Remove existing UI
         document.getElementById('nonogram-grid')?.remove();
         buttonContainer?.remove();
         controlContainer?.remove();
+        loadLayout();
 
-        // Constants
-        const max_bg_w     = 800;
-        const max_bg_h     = 630;
-        const margin       = 15;
-        const header_space = 25;
-
-        // Factor t
+        // sizing logic
+        const max_bg_w = 800, max_bg_h = 630, margin = 15, header_space = 25;
         const t = (size - 4) / (20 - 4);
-
-        // Font sizes
-        const headerFontSize = Math.floor(48 + (32 - 48) * t);
-        const hintFontSize   = Math.floor(44 + (30 - 44) * t);
-        const hintFont       = `bold ${hintFontSize}px Arial`;
-
-                // Measure a single clue digit width
+        const hintFontSize = Math.floor(44 + (30 - 44) * t);
+        const hintFont = `bold ${hintFontSize}px Arial`;
         const span = document.createElement('span');
-        Object.assign(span.style, { position:'absolute', visibility:'hidden', font:hintFont, padding:0, margin:0 });
-        span.textContent = '0';
-        document.body.appendChild(span);
-        const clueW = span.getBoundingClientRect().width;
-        document.body.removeChild(span);
-
-        // Hardcoded clue heights per size (matches Pygame font metrics)
-        const clueHMap = {
-            4:44, 5:43, 6:42, 7:41, 8:40, 9:39,
-            10:38, 11:37, 12:37, 13:36, 14:35, 15:34,
-            16:33, 17:32, 18:31, 19:30, 20:30
-        };
+        Object.assign(span.style, { position:'absolute', visibility:'hidden', font:hintFont });
+        span.textContent = '0'; document.body.appendChild(span);
+        const clueW = span.getBoundingClientRect().width; document.body.removeChild(span);
+        const clueHMap = {4:44,5:43,6:42,7:41,8:40,9:39,10:38,11:37,12:37,13:36,14:35,15:34,16:33,17:32,18:31,19:30,20:30};
         const clueH = clueHMap[size] ?? hintFontSize;
-
-        // Hint band sizes
-
         const rowHintW = rowClueCount * clueW + (rowClueCount - 1) * clueW * 0.5 + header_space;
         const colHintH = colClueCount * clueH + header_space;
-
-
-        // Available area
         const availW = max_bg_w - 2 * margin - rowHintW;
         const availH = max_bg_h - 2 * margin - colHintH;
-
-        // Grid and cell size
         const gridSize = Math.min(availW, availH);
-        const baseCell = gridSize / size;
-        const cellSize = baseCell * ratio;
-        // Create grid container
+        const baseCell = (gridSize + fineTune) * ratio / size;
+        const cellSize = baseCell;
+
         const grid = document.createElement('div');
         grid.id = 'nonogram-grid';
         Object.assign(grid.style, {
-            position:            'fixed',
-            right:               `${gridX}px`,
-            bottom:              `${gridY}px`,
-            display:             'grid',
+            position: 'fixed',
+            right: `${gridX}px`,
+            bottom: `${gridY}px`,
+            display: 'grid',
             gridTemplateColumns: `repeat(${size}, ${cellSize}px)`,
             gridTemplateRows:    `repeat(${size}, ${cellSize}px)`,
-            border:              '2px solid cyan',
-            backgroundColor:     'rgba(255,255,255,0.1)',
-            cursor:              'move',
-            zIndex:              '10000'
+            border: '2px solid cyan',
+            backgroundColor: 'rgba(255,255,255,0.1)',
+            cursor: 'move',
+            zIndex: '10000'
         });
         document.body.appendChild(grid);
 
-        // Populate cells
         for (let r = 0; r < size; r++) {
             for (let c = 0; c < size; c++) {
                 const cell = document.createElement('div');
                 Object.assign(cell.style, {
-                    boxSizing: 'border-box',
-                    width:     `${cellSize}px`,
-                    height:    `${cellSize}px`,
-                    border:    '1px solid rgba(0,255,255,0.3)'
+                    boxSizing: 'content-box',
+                    width:  `${cellSize - 2}px`,
+                    height: `${cellSize - 2}px`,
+                    border: '1px solid rgba(0,255,255,0.3)'
                 });
                 cell.dataset.row = r;
                 cell.dataset.col = c;
-                cell.addEventListener('click', () => cell.style.backgroundColor = 'black');
+
+                // toggle black ↔ empty on left-click
+                cell.addEventListener('click', () => {
+                    const isBlack = cell.style.backgroundColor === 'black';
+                    cell.style.backgroundColor = isBlack ? 'transparent' : 'black';
+                });
+
+                // white ↔ transparent on right-click
                 cell.addEventListener('contextmenu', e => {
                     e.preventDefault();
-                    cell.style.backgroundColor = cell.style.backgroundColor === 'white' ? 'transparent' : 'white';
+                    cell.style.backgroundColor =
+                        cell.style.backgroundColor === 'white' ? 'transparent' : 'white';
                 });
+
                 grid.appendChild(cell);
             }
         }
 
-        // Attach controls
         makeDraggable(grid);
         createMainButtons();
         createControlPanel();
+        createConfigPanel();
         updateControlPositions();
     }
 
-    // Draggable logic
+    // Draggable grid
     function makeDraggable(el) {
         let dx, dy;
         el.addEventListener('mousedown', e => {
@@ -173,141 +147,235 @@
         document.addEventListener('mousemove', e => {
             if (!isDragging) return;
             const newLeft = e.clientX - dx;
-            const newTop = e.clientY - dy;
-            const rect = el.getBoundingClientRect();
-            gridX = window.innerWidth - (newLeft + rect.width);
-            gridY = window.innerHeight - (newTop + rect.height);
-            el.style.right = `${gridX}px`;
+            const newTop  = e.clientY - dy;
+            const rect    = el.getBoundingClientRect();
+            gridX = window.innerWidth  - (newLeft + rect.width);
+            gridY = window.innerHeight - (newTop  + rect.height);
+            el.style.right  = `${gridX}px`;
             el.style.bottom = `${gridY}px`;
             updateControlPositions();
         });
         document.addEventListener('mouseup', () => {
+            if (isDragging) saveLayout();
             isDragging = false;
             el.style.pointerEvents = 'auto';
         });
     }
 
-    // Main buttons
+    // Main buttons side-by-side at bottom-left
     function createMainButtons() {
         buttonContainer = document.createElement('div');
         buttonContainer.id = 'button-container';
-        Object.assign(buttonContainer.style, { position:'fixed', zIndex:'10001', display:'flex', gap:'4px' });
+        Object.assign(buttonContainer.style, {
+            position: 'fixed',
+            zIndex:   '10001',
+            display:  'flex',
+            gap:      '4px',
+            color:    'black'
+        });
         document.body.appendChild(buttonContainer);
-        const btns = [
-            { id:'export-btn', text:'Export ✓', cb:exportBlackCells },
-            { id:'config-btn', text:'⚙️', cb:toggleConfigPanel }
-        ];
-        btns.forEach(bd => {
-            const b = document.createElement('button'); b.id = bd.id; b.textContent = bd.text;
-            Object.assign(b.style, { padding:'4px 8px', background:'#0056b3', color:'#fff', border:'none', borderRadius:'3px', cursor:'pointer' });
-            b.addEventListener('click', bd.cb);
-            buttonContainer.appendChild(b);
+
+        [
+            { id: 'export-btn', text: 'Export ✓', cb: exportBlackCells },
+            { id: 'config-btn', text: '⚙️',       cb: toggleConfigPanel }
+        ].forEach(bd => {
+            const btn = document.createElement('button');
+            btn.id          = bd.id;
+            btn.textContent = bd.text;
+            Object.assign(btn.style, {
+                padding:       '4px 8px',
+                background:    '#fff',
+                border:        '1px solid #000',
+                borderRadius:  '3px',
+                cursor:        'pointer',
+                color:         'black'
+            });
+            btn.addEventListener('click', bd.cb);
+            buttonContainer.appendChild(btn);
         });
     }
 
-    // Export filled cells
+    // Export only newly-filled black cells since last export
     function exportBlackCells() {
-        const grid = document.getElementById('nonogram-grid'); if (!grid) return;
-        const filled = [];
+        const grid = document.getElementById('nonogram-grid');
+        if (!grid) return;
+
+        const newly = [];
         Array.from(grid.children).forEach(cell => {
             if (cell.style.backgroundColor === 'black') {
-                const r = +cell.dataset.row + 1;
-                const c = String.fromCharCode(97 + (+cell.dataset.col));
-                filled.push(`${c}${r}`);
+                const coord = `${String.fromCharCode(97 + +cell.dataset.col)}${+cell.dataset.row + 1}`;
+                if (!lastExported.has(coord)) {
+                    newly.push(coord);
+                    lastExported.add(coord);
+                }
             }
         });
-        if (filled.length) navigator.clipboard.writeText(`!fill ${filled.join(' ')}`);
+
+        if (newly.length) {
+            navigator.clipboard.writeText(`!fill ${newly.join(' ')}`);
+        }
     }
 
-    // Control panel UI
+    // Quick control panel
     function createControlPanel() {
-        controlContainer = document.createElement('div'); controlContainer.id='control-container';
-        Object.assign(controlContainer.style, { position:'fixed', zIndex:'10001', padding:'8px', background:'#fff', border:'1px solid #007BFF', borderRadius:'4px', boxShadow:'0 2px 6px rgba(0,0,0,0.2)', lineHeight:'1.4em' });
+        controlContainer = document.createElement('div');
+        controlContainer.id = 'control-container';
+        Object.assign(controlContainer.style, {
+            position:      'fixed',
+            zIndex:        '10001',
+            padding:       '8px',
+            background:    '#fff',
+            border:        '1px solid #000',
+            borderRadius:  '4px',
+            boxShadow:     '0 2px 6px rgba(0,0,0,0.2)',
+            lineHeight:    '1.4em',
+            color:         'black'
+        });
         document.body.appendChild(controlContainer);
+
         const sections = [
-            { label:'Grid size', get:() => size,        dec:() => size=Math.max(1,size-1), inc:() => size++       },
-            { label:'Row clues',get:() => rowClueCount, dec:() => rowClueCount=Math.max(1,rowClueCount-1), inc:() => rowClueCount++ },
-            { label:'Col clues',get:() => colClueCount, dec:() => colClueCount=Math.max(1,colClueCount-1), inc:() => colClueCount++ },
-            { label: 'Scale', get:    () => ratio.toFixed(3),dec:    () => {ratio = Math.max(0.01, ratio - 0.01); ratio = Math.round(ratio * 1000) / 1000;}, inc:    () => {ratio = ratio + 0.01;ratio = Math.round(ratio * 1000) / 1000;}}
+            { key: 'size',  label: 'Grid size',  get: () => size,         dec: () => { saveLayout(); size = Math.max(1, size-1); createGrid(); }, inc: () => { saveLayout(); size++; createGrid(); } },
+            { key: 'rows',  label: 'Row clues', get: () => rowClueCount, dec: () => { saveLayout(); rowClueCount = Math.max(1, rowClueCount-1); createGrid(); }, inc: () => { saveLayout(); rowClueCount++; createGrid(); } },
+            { key: 'cols',  label: 'Col clues', get: () => colClueCount, dec: () => { saveLayout(); colClueCount = Math.max(1, colClueCount-1); createGrid(); }, inc: () => { saveLayout(); colClueCount++; createGrid(); } }
         ];
-        sections.forEach((s,i) => {
-            const lbl = document.createElement('div'); lbl.textContent = `${s.label}: ${s.get()}`; lbl.style.fontWeight='bold'; lbl.style.color       = 'black';
-            controlContainer.appendChild(lbl);
-            const row = document.createElement('div'); row.style.display='flex'; row.style.gap='4px'; row.style.marginBottom='8px';
-            controlContainer.appendChild(row);
-            [['–',s.dec],['+',s.inc]].forEach(([sym,fn]) => {
-                const btn = document.createElement('button'); btn.textContent=sym;
-                Object.assign(btn.style,{width:'24px',height:'24px',border:'none',borderRadius:'3px',fontSize:'16px',background:'#007BFF',color:'#fff',cursor:'pointer'});
-                btn.addEventListener('click',() => { fn(); saveConfig(currentConfigName); createGrid(); });
+        const scaleSection = { key: 'scale', label: 'Scale',     get: () => ratio.toFixed(3), dec: () => { ratio = Math.max(0.01, +(ratio-0.01).toFixed(3)); saveLayout(); createGrid(); }, inc: () => { ratio = +(ratio+0.01).toFixed(3); saveLayout(); createGrid(); } };
+        const fineSection  = { key: 'fine',  label: 'Fine tune', get: () => fineTune,          dec: () => { fineTune--; saveLayout(); createGrid(); }, inc: () => { fineTune++; saveLayout(); createGrid(); } };
+        const allSections  = sections.concat([ scaleSection, fineSection ]);
+
+        allSections.forEach((s,i) => {
+            const sec = document.createElement('div');
+            sec.id = `section-${s.key}`;
+            const lbl = document.createElement('div');
+            lbl.textContent = `${s.label}: ${s.get()}`;
+            lbl.style.fontWeight = 'bold';
+            sec.appendChild(lbl);
+
+            const row = document.createElement('div');
+            Object.assign(row.style, { display: 'flex', gap: '4px', marginBottom: '8px' });
+            sec.appendChild(row);
+
+            [['–', s.dec], ['+', s.inc]].forEach(([sym, fn]) => {
+                const btn = document.createElement('button');
+                btn.textContent = sym;
+                Object.assign(btn.style, {
+                    width: '24px', height: '24px',
+                    border: '1px solid #000',
+                    borderRadius: '3px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    color: 'black'
+                });
+                btn.addEventListener('click', fn);
                 row.appendChild(btn);
             });
-            if (i<sections.length-1) controlContainer.appendChild(document.createElement('hr'));
+
+            controlContainer.appendChild(sec);
+            if (i < allSections.length - 1) controlContainer.appendChild(document.createElement('hr'));
         });
     }
 
-    // Config dropdown
-    function populateConfigDropdown() {
-        if (!configPanel) return;
-        const sel = document.getElementById('configList'); sel.innerHTML='';
-        Object.keys(configs).forEach(k => { const o=document.createElement('option'); o.value=k; o.textContent=k; sel.appendChild(o); });
-        sel.value=currentConfigName;
-    }
-
-    // Config panel UI
+    // Config panel with import/export
     function createConfigPanel() {
         if (configPanel) return;
-        configPanel = document.createElement('div'); configPanel.id='config-panel';
-        Object.assign(configPanel.style,{position:'fixed',top:'10px',left:'10px',background:'#fff',color:'#000',padding:'8px',border:'1px solid #000',zIndex:'10002',display:'none'});
+        configPanel = document.createElement('div');
+        configPanel.id = 'config-panel';
+        Object.assign(configPanel.style, {
+            position:     'fixed',
+            top:          '10px',
+            left:         '10px',
+            background:   '#fff',
+            padding:      '8px',
+            border:       '1px solid #000',
+            borderRadius: '4px',
+            zIndex:       '10002',
+            color:        'black',
+            display:      'none'
+        });
+
         configPanel.innerHTML = `
-            <label>Size:       <input id="cfg-size"       type="number" step="1" value="${size}"         min="1"/></label><br/>
-            <label>Row Clues:  <input id="cfg-row-clues" type="number" step="1" value="${rowClueCount}" min="1"/></label><br/>
-            <label>Col Clues:  <input id="cfg-col-clues" type="number" step="1" value="${colClueCount}" min="1"/></label><br/>
-            <label>Scale:      <input id="cfg-ratio"      type="number" step="0.01" value="${ratio}"      min="0.01"/></label><br/>
-            <label>Save As:    <input id="cfg-name"       type="text" placeholder="name"/></label><br/>
-            <label>Load:       <select id="configList"></select></label><br/>
+            <label>Size:       <input id="cfg-size" type="number" value="${size}" min="1"/></label><br/>
+            <label>Row Clues:  <input id="cfg-rows" type="number" value="${rowClueCount}" min="1"/></label><br/>
+            <label>Col Clues:  <input id="cfg-cols" type="number" value="${colClueCount}" min="1"/></label><br/>
+            <label>Scale:      <input id="cfg-ratio" type="number" step="0.01" value="${ratio}" min="0.01"/></label><br/>
+            <label>Fine Tune:  <input id="cfg-fine" type="number" step="1" value="${fineTune}"/></label><br/>
+            <label><input id="cfg-toggle-controls" type="checkbox" checked/> Show Scale & Fine Controls</label><br/><br/>
+            <button id="export-configs-btn">Export Configs</button>
+            <button id="import-configs-btn">Import Configs</button>
+            <input type="file" id="import-configs-file" accept="application/json" style="display:none"/><br/><br/>
             <button id="apply-btn">Apply</button>
-            <button id="save-btn">Save</button>
-            <button id="load-btn">Load</button>
-            <button id="del-btn">Delete</button>
         `;
         document.body.appendChild(configPanel);
-        populateConfigDropdown();
-        document.getElementById('apply-btn').addEventListener('click',() => {
-            size = +document.getElementById('cfg-size').value;
-            rowClueCount = +document.getElementById('cfg-row-clues').value;
-            colClueCount = +document.getElementById('cfg-col-clues').value;
-            ratio = parseFloat(document.getElementById('cfg-ratio').value);
-            const val=document.getElementById('configList').value; currentConfigName=val||currentConfigName;
-            saveConfig(currentConfigName); createGrid();
+
+        // toggle scale/fine sections
+        const toggleCheckbox = configPanel.querySelector('#cfg-toggle-controls');
+        toggleCheckbox.addEventListener('change', () => {
+            const display = toggleCheckbox.checked ? 'block' : 'none';
+            ['scale','fine'].forEach(key => {
+                const sec = document.getElementById(`section-${key}`);
+                if (sec) sec.style.display = display;
+            });
         });
-        document.getElementById('save-btn').addEventListener('click',()=>{ const name=document.getElementById('cfg-name').value.trim()||prompt('Config name?'); if(name) saveConfig(name);} );
-        document.getElementById('load-btn').addEventListener('click',()=>{ const name=document.getElementById('configList').value; if(name) loadConfig(name);} );
-        document.getElementById('del-btn').addEventListener('click',()=>{ const name=document.getElementById('configList').value; if(name&&confirm(`Delete config "${name}"?`)) deleteConfig(name);} );
+
+        // Apply changes
+        configPanel.querySelector('#apply-btn').addEventListener('click', () => {
+            size          = +configPanel.querySelector('#cfg-size').value;
+            rowClueCount  = +configPanel.querySelector('#cfg-rows').value;
+            colClueCount  = +configPanel.querySelector('#cfg-cols').value;
+            ratio         = parseFloat(configPanel.querySelector('#cfg-ratio').value);
+            fineTune      = parseInt(configPanel.querySelector('#cfg-fine').value, 10);
+            saveLayout();
+            createGrid();
+        });
+
+        // Export configs to clipboard
+        configPanel.querySelector('#export-configs-btn').addEventListener('click', () => {
+            const data = JSON.stringify(configs, null, 2);
+            navigator.clipboard.writeText(data)
+                .then(() => alert('Configs JSON copied to clipboard!'))
+                .catch(() => alert('Failed to copy configs to clipboard.'));
+        });
+
+        // Trigger file-pick for import
+        configPanel.querySelector('#import-configs-btn').addEventListener('click', () => {
+            configPanel.querySelector('#import-configs-file').click();
+        });
+
+        // Handle file import
+        configPanel.querySelector('#import-configs-file').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = evt => {
+                try {
+                    const imported = JSON.parse(evt.target.result);
+                    configs = Object.assign({}, configs, imported);
+                    localStorage.setItem('nonogramConfigMap', JSON.stringify(configs));
+                    alert('Configs imported successfully!');
+                    createGrid();
+                } catch {
+                    alert('Invalid JSON file.');
+                }
+            };
+            reader.readAsText(file);
+        });
     }
 
-    // Toggle config panel
     function toggleConfigPanel() {
-        if (configPanel) configPanel.style.display = configPanel.style.display === 'none' ? 'block' : 'none';
+        createConfigPanel();
+        configPanel.style.display = configPanel.style.display === 'none' ? 'block' : 'none';
     }
 
-    // Update control positions
+    // Update positions for buttons & panel
     function updateControlPositions() {
         const g = document.getElementById('nonogram-grid').getBoundingClientRect();
         buttonContainer.style.left = `${g.left}px`;
         buttonContainer.style.top  = `${g.bottom + 8}px`;
-        controlContainer.style.left = `${g.right + 8}px`;
-        controlContainer.style.top  = `${g.top}px`;
+        if (controlContainer) {
+            controlContainer.style.left = `${g.right + 8}px`;
+            controlContainer.style.top  = `${g.top}px`;
+        }
     }
 
-    // Initialization
-    if (document.readyState === 'complete') {
-      createGrid();
-      createConfigPanel();
-    } else {
-      window.addEventListener('load', () => {
-        createGrid();
-        createConfigPanel();
-      });
-    }
+    window.addEventListener('load', createGrid);
 
 })();
