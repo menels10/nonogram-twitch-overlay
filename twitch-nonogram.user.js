@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid (v1.8) – Python Logic + Ratio Only + Auto-Persist per Layout + Config UI + Fine Tune + Toggle Controls + Import/Export Configs + Reset Size/Clues
+// @name         Twitch Nonogram Grid (v1.9) move
 // @namespace    http://tampermonkey.net/
-// @version      1.19.4
-// @description  Uses Python `render_nonogram` logic with ratio scaling, per-layout persistence, full config panel, per-cellSize fine tuning, toggleable scale/fine controls, import/export of configs, and reset-to-4×1×1 controls, with blue buttons aligned properly.
-// @author       mr_pantera666, Menels and a LOT of chatGPT
- // @match        https://www.twitch.tv/goki*
- // @grant        none
- // @run-at       document-idle
- // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
+// @version      1.19.5
+// @description  Adds manual X/Y anchor in config and a drag-handle button to reposition the grid
+// @author       mr_pantera666, Menels, chatGPT
+// @match        https://www.twitch.tv/goki*
+// @grant        none
+// @run-at       document-idle
+// @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram.user.js
 // ==/UserScript==
 
 (function() {
@@ -28,6 +28,7 @@
     // UI containers
     let buttonContainer, controlContainer, configPanel;
     let isDragging = false;
+    let dragOffset = { dx: 0, dy: 0 };
     let lastExported = new Set();
 
     function getKey(sz, rc, cc) { return `${sz}x${rc}x${cc}`; }
@@ -50,7 +51,6 @@
     }
 
     function createGrid() {
-        // — RESET THE EXPORT CACHE ON EVERY GRID REBUILD —
         lastExported.clear();
         document.getElementById('nonogram-grid')?.remove();
         buttonContainer?.remove();
@@ -134,54 +134,130 @@
                 el.style.pointerEvents = 'none';
             }
         });
-        document.addEventListener('mousemove', e => {
-            if (!isDragging) return;
-            const newLeft = e.clientX - dx, newTop = e.clientY - dy;
-            const rect = el.getBoundingClientRect();
-            gridX = window.innerWidth  - (newLeft + rect.width);
-            gridY = window.innerHeight - (newTop  + rect.height);
-            el.style.right  = `${gridX}px`;
-            el.style.bottom = `${gridY}px`;
-            updateControlPositions();
-        });
-        document.addEventListener('mouseup', () => {
-            if (isDragging) saveLayout();
-            isDragging = false;
-            el.style.pointerEvents = 'auto';
-        });
     }
 
     function createMainButtons() {
         buttonContainer = document.createElement('div');
         buttonContainer.id = 'button-container';
         Object.assign(buttonContainer.style, {
-            position: 'fixed',
-            zIndex:   '10001',
-            display:  'flex',
-            gap:      '4px',
-            color:    'black'
+            position: 'fixed', zIndex: '10001', display: 'flex', gap: '4px', color: 'black'
         });
         document.body.appendChild(buttonContainer);
 
-        [
+        const buttons = [
             { id: 'export-btn', text: 'Export ✓', cb: exportBlackCells },
-            { id: 'config-btn', text: '⚙️',       cb: toggleConfigPanel }
-        ].forEach(bd => {
+            { id: 'config-btn', text: '⚙️',       cb: toggleConfigPanel },
+            { id: 'drag-btn',   text: '🤚',       cb: null }
+        ];
+        buttons.forEach(bd => {
             const btn = document.createElement('button');
-            btn.id          = bd.id;
-            btn.textContent = bd.text;
+            btn.id = bd.id; btn.textContent = bd.text;
             Object.assign(btn.style, {
-                padding:       '4px 8px',
-                background:    '#fff',
-                border:        '1px solid #000',
-                borderRadius:  '3px',
-                cursor:        'pointer',
-                color:         'black'
+                padding: '4px 8px', border: '1px solid #000', borderRadius: '3px', cursor: 'pointer', background: '#fff'
             });
-            btn.addEventListener('click', bd.cb);
+            if (bd.cb) btn.addEventListener('click', bd.cb);
             buttonContainer.appendChild(btn);
         });
+
+        // drag-btn events
+        const dragBtn = document.getElementById('drag-btn');
+        dragBtn.addEventListener('mousedown', e => {
+            e.preventDefault();
+            const grid = document.getElementById('nonogram-grid');
+            if (!grid) return;
+            isDragging = true;
+            const rect = grid.getBoundingClientRect();
+            dragOffset.dx = e.clientX - rect.left;
+            dragOffset.dy = e.clientY - rect.top;
+        });
+        document.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const grid = document.getElementById('nonogram-grid');
+            if (!grid) return;
+            const newLeft = e.clientX - dragOffset.dx;
+            const newTop  = e.clientY - dragOffset.dy;
+            const rect = grid.getBoundingClientRect();
+            gridX = window.innerWidth  - (newLeft + rect.width);
+            gridY = window.innerHeight - (newTop  + rect.height);
+            grid.style.right  = `${gridX}px`;
+            grid.style.bottom = `${gridY}px`;
+            updateControlPositions();
+        });
+        document.addEventListener('mouseup', () => {
+            if (isDragging) saveLayout();
+            isDragging = false;
+        });
     }
+
+    function createConfigPanel() {
+        if (configPanel) return;
+        configPanel = document.createElement('div');
+        configPanel.id = 'config-panel';
+        Object.assign(configPanel.style, { position:'fixed', top:'10px', left:'10px', background:'#fff', padding:'8px', border:'1px solid #000', borderRadius:'4px', zIndex:'10002', color:'black', display:'none' });
+        configPanel.innerHTML = `
+            <label>Size:       <input id="cfg-size" type="number" value="${size}" min="1"/></label><br/>
+            <label>Row Clues:  <input id="cfg-rows" type="number" value="${rowClueCount}" min="1"/></label><br/>
+            <label>Col Clues:  <input id="cfg-cols" type="number" value="${colClueCount}" min="1"/></label><br/>
+            <label>Scale:      <input id="cfg-ratio" type="number" step="0.01" value="${ratio}" min="0.01"/></label><br/>
+            <label>Fine Tune:  <input id="cfg-fine" type="number" step="1" value="${fineTune}"/></label><br/>
+            <label>Anchor X:   <input id="cfg-gridX" type="number" step="1" value="${gridX}"/></label><br/>
+            <label>Anchor Y:   <input id="cfg-gridY" type="number" step="1" value="${gridY}"/></label><br/>
+            <label><input id="cfg-toggle-controls" type="checkbox" checked/> Show Scale & Fine Controls</label><br/><br/>
+            <button id="export-configs-btn">Export Configs</button>
+            <button id="import-configs-btn">Import Configs</button>
+            <input type="file" id="import-configs-file" accept="application/json" style="display:none"/><br/><br/>
+            <button id="apply-btn">Apply</button>
+        `;
+        document.body.appendChild(configPanel);
+
+        // toggle scale/fine
+        configPanel.querySelector('#cfg-toggle-controls').addEventListener('change', e => {
+            const display = e.target.checked ? 'block' : 'none';
+            ['scale','fine'].forEach(k => document.getElementById(`section-${k}`).style.display = display);
+        });
+
+        // apply
+        configPanel.querySelector('#apply-btn').addEventListener('click', () => {
+            size         = +configPanel.querySelector('#cfg-size').value;
+            rowClueCount = +configPanel.querySelector('#cfg-rows').value;
+            colClueCount = +configPanel.querySelector('#cfg-cols').value;
+            ratio        = parseFloat(configPanel.querySelector('#cfg-ratio').value);
+            fineTune     = parseInt(configPanel.querySelector('#cfg-fine').value, 10);
+            gridX        = parseInt(configPanel.querySelector('#cfg-gridX').value, 10);
+            gridY        = parseInt(configPanel.querySelector('#cfg-gridY').value, 10);
+            saveLayout();
+            createGrid();
+        });
+
+        // export/import logic ...
+        configPanel.querySelector('#export-configs-btn').addEventListener('click', () => {
+            const data = JSON.stringify(configs, null, 2);
+            navigator.clipboard.writeText(data)
+                .then(() => alert('Configs JSON copied to clipboard!'))
+                .catch(() => alert('Failed to copy configs to clipboard.'));
+        });
+        configPanel.querySelector('#import-configs-btn').addEventListener('click', () => {
+            configPanel.querySelector('#import-configs-file').click();
+        });
+        configPanel.querySelector('#import-configs-file').addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = evt => {
+                try {
+                    const imported = JSON.parse(evt.target.result);
+                    configs = Object.assign({}, configs, imported);
+                    localStorage.setItem('nonogramConfigMap', JSON.stringify(configs));
+                    alert('Configs imported successfully!');
+                    createGrid();
+                } catch {
+                    alert('Invalid JSON file.');
+                }
+            };
+            reader.readAsText(file);
+        });
+    }
+    
 
     function exportBlackCells() {
         const grid = document.getElementById('nonogram-grid');
@@ -198,7 +274,22 @@
         });
         if (newly.length) navigator.clipboard.writeText(`!fill ${newly.join(' ')}`);
     }
+    function toggleConfigPanel() { createConfigPanel(); configPanel.style.display = (configPanel.style.display === 'none' ? 'block' : 'none'); }
+    function updateControlPositions() {
+        const g = document.getElementById('nonogram-grid').getBoundingClientRect();
+        buttonContainer.style.left = `${g.left}px`;
+        buttonContainer.style.top  = `${g.bottom + 8}px`;
+        if (controlContainer) {
+            controlContainer.style.left = `${g.right + 8}px`;
+            controlContainer.style.top  = `${g.top}px`;
+        }
 
+        // *** new: keep the X/Y inputs in sync ***
+        const inpX = document.getElementById('cfg-gridX');
+        const inpY = document.getElementById('cfg-gridY');
+        if (inpX) inpX.value = gridX;
+        if (inpY) inpY.value = gridY;
+    }
     function createControlPanel() {
         controlContainer = document.createElement('div');
         controlContainer.id = 'control-container';
@@ -325,114 +416,7 @@
         });
     }
 
-    function createConfigPanel() {
-        if (configPanel) return;
-        configPanel = document.createElement('div');
-        configPanel.id = 'config-panel';
-        Object.assign(configPanel.style, {
-            position:     'fixed',
-            top:          '10px',
-            left:         '10px',
-            background:   '#fff',
-            padding:      '8px',
-            border:       '1px solid #000',
-            borderRadius: '4px',
-            zIndex:       '10002',
-            color:        'black',
-            display:      'none'
-        });
 
-        configPanel.innerHTML = `
-            <label>Size:       <input id="cfg-size" type="number" value="${size}" min="1"/></label><br/>
-            <label>Row Clues:  <input id="cfg-rows" type="number" value="${rowClueCount}" min="1"/></label><br/>
-            <label>Col Clues:  <input id="cfg-cols" type="number" value="${colClueCount}" min="1"/></label><br/>
-            <label>Scale:      <input id="cfg-ratio" type="number" step="0.01" value="${ratio}" min="0.01"/></label><br/>
-            <label>Fine Tune:  <input id="cfg-fine" type="number" step="1" value="${fineTune}"/></label><br/>
-            <label><input id="cfg-toggle-controls" type="checkbox" checked/> Show Scale & Fine Controls</label><br/><br/>
-            <button id="export-configs-btn">Export Configs</button>
-            <button id="import-configs-btn">Import Configs</button>
-            <input type="file" id="import-configs-file" accept="application/json" style="display:none"/><br/><br/>
-            <button id="apply-btn">Apply</button>
-        `;
-        document.body.appendChild(configPanel);
-
-        // toggle scale/fine
-        const toggleCheckbox = configPanel.querySelector('#cfg-toggle-controls');
-        toggleCheckbox.addEventListener('change', () => {
-            const display = toggleCheckbox.checked ? 'block' : 'none';
-            ['scale', 'fine'].forEach(key => {
-                const sec = document.getElementById(`section-${key}`);
-                if (sec) sec.style.display = display;
-            });
-        });
-
-        // apply
-        configPanel.querySelector('#apply-btn').addEventListener('click', () => {
-            size          = +configPanel.querySelector('#cfg-size').value;
-            rowClueCount  = +configPanel.querySelector('#cfg-rows').value;
-            colClueCount  = +configPanel.querySelector('#cfg-cols').value;
-            ratio         = parseFloat(configPanel.querySelector('#cfg-ratio').value);
-            fineTune      = parseInt(configPanel.querySelector('#cfg-fine').value, 10);
-            saveLayout();
-            createGrid();
-        });
-
-        // export/import logic ...
-        configPanel.querySelector('#export-configs-btn').addEventListener('click', () => {
-            const data = JSON.stringify(configs, null, 2);
-            navigator.clipboard.writeText(data)
-                .then(() => alert('Configs JSON copied to clipboard!'))
-                .catch(() => alert('Failed to copy configs to clipboard.'));
-        });
-        configPanel.querySelector('#import-configs-btn').addEventListener('click', () => {
-            configPanel.querySelector('#import-configs-file').click();
-        });
-        configPanel.querySelector('#import-configs-file').addEventListener('change', e => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = evt => {
-                try {
-                    const imported = JSON.parse(evt.target.result);
-                    configs = Object.assign({}, configs, imported);
-                    localStorage.setItem('nonogramConfigMap', JSON.stringify(configs));
-                    alert('Configs imported successfully!');
-                    createGrid();
-                } catch {
-                    alert('Invalid JSON file.');
-                }
-            };
-            reader.readAsText(file);
-        });
-    }
-
-    function toggleConfigPanel() {
-        createConfigPanel();
-        configPanel.style.display = configPanel.style.display === 'none' ? 'block' : 'none';
-    }
-
-    function updateControlPositions() {
-        const g = document.getElementById('nonogram-grid').getBoundingClientRect();
-        buttonContainer.style.left = `${g.left}px`;
-        buttonContainer.style.top  = `${g.bottom + 8}px`;
-        if (controlContainer) {
-            controlContainer.style.left = `${g.right + 8}px`;
-            controlContainer.style.top  = `${g.top}px`;
-        }
-    }
-
-    // Unified initializer
-    function initNonogram() {
-      createGrid();
-      createConfigPanel();
-    }
-
-    // If page’s already ready, fire now; otherwise wait for load
-    if (document.readyState === 'complete' ||
-        document.readyState === 'interactive') {
-      initNonogram();
-    } else {
-      window.addEventListener('load', initNonogram);
-    }
-
+    function initNonogram() { createGrid(); createConfigPanel(); }
+    if (document.readyState==='complete' || document.readyState==='interactive') initNonogram(); else window.addEventListener('load', initNonogram);
 })();
