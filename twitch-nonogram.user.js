@@ -9,18 +9,19 @@
 // @run-at       document-idle
 // ==/UserScript==
 
+
 (function() {
     'use strict';
 
     // Default config values
-    const DEFAULT_CONF = { ratio: 0.5, gridX: 340, gridY: 240, fineTune: 0 };
+    const DEFAULT_CONF = { ratio: 0.5, gridX: 376, gridY: 114, fineTune: 0 };
     const DEFAULT_GLOBAL_CONF = {
-        shrinkUpRatio:       0.8,
-        shrinkUpDX:          -20,
-        shrinkUpDY:          20,
-        shrinkUpLeftRatio:   0.9,
-        shrinkUpLeftDX:      0,
-        shrinkUpLeftDY:      20
+        shrinkUpLeftRatio:       0.92,
+        shrinkUpLeftDX:          100,
+        shrinkUpLeftDY:          18,
+        shrinkUpRatio:   0.917,
+        shrinkUpDX:      0,
+        shrinkUpDY:      20
     };
     // Stored per-layout configs
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
@@ -42,7 +43,7 @@
     function saveGlobalConfig() {
         localStorage.setItem('nonogramGlobalConfig', JSON.stringify(globalConfig));
     }// state for the two toggle‐buttons
-    let shrinkFlags = { up: false, upLeft: false };
+    let shrinkFlags = { upLeft: false, up: false };
     function loadLayout() {
         const key = getKey(size, rowClueCount, colClueCount);
         const saved = configs[key];
@@ -66,15 +67,15 @@
         buttonContainer?.remove();
         controlContainer?.remove();
         loadLayout();
-        if (shrinkFlags.up) {
-            ratio  *= globalConfig.shrinkUpRatio;
-            gridX  += globalConfig.shrinkUpDX;
-            gridY  += globalConfig.shrinkUpDY;
-        }
         if (shrinkFlags.upLeft) {
             ratio  *= globalConfig.shrinkUpLeftRatio;
             gridX  += globalConfig.shrinkUpLeftDX;
             gridY  += globalConfig.shrinkUpLeftDY;
+        }
+        if (shrinkFlags.up) {
+            ratio  *= globalConfig.shrinkUpRatio;
+            gridX  += globalConfig.shrinkUpDX;
+            gridY  += globalConfig.shrinkUpDY;
         }
         // sizing logic...
         const max_bg_w = 800, max_bg_h = 630, margin = 15, header_space = 25;
@@ -167,8 +168,8 @@
             { id: 'export-btn', text: 'Export ✓', cb: exportBlackCells },
             { id: 'config-btn', text: '⚙️',       cb: toggleConfigPanel },
             { id: 'drag-btn',   text: '🤚',       cb: null },
-            { id: 'shrink-up-btn',      text: '↖',  cb: () => toggleShrink('up') },
-            { id: 'shrink-up-left-btn', text: '↑', cb: () => toggleShrink('upLeft') }
+            { id: 'shrink-up-left-btn',      text: '↖',  cb: () => toggleShrink('upLeft') },
+            { id: 'shrink-up-btn', text: '↑', cb: () => toggleShrink('up') }
 
         ];
         buttons.forEach(bd => {
@@ -241,12 +242,12 @@
             <input type="file" id="import-configs-file" accept="application/json" style="display:none"/><br/><br/>
                 <hr>
     <h4>Shrink‐button settings</h4>
-    <label>Up Ratio:       <input id="cfg-shrink-up-ratio"  type="number" step="0.01" value="${globalConfig.shrinkUpRatio}"/></label><br/>
-    <label>Up Shift X:     <input id="cfg-shrink-up-dx"     type="number"         value="${globalConfig.shrinkUpDX}"/></label><br/>
-    <label>Up Shift Y:     <input id="cfg-shrink-up-dy"     type="number"         value="${globalConfig.shrinkUpDY}"/></label><br/>
-    <label>Up‐Left Ratio:  <input id="cfg-shrink-ul-ratio"  type="number" step="0.01" value="${globalConfig.shrinkUpLeftRatio}"/></label><br/>
-    <label>Up‐Left Shift X:<input id="cfg-shrink-ul-dx"     type="number"         value="${globalConfig.shrinkUpLeftDX}"/></label><br/>
-    <label>Up‐Left Shift Y:<input id="cfg-shrink-ul-dy"     type="number"         value="${globalConfig.shrinkUpLeftDY}"/></label><br/>
+    <label>Up Ratio:       <input id="cfg-shrink-up-ratio"  type="number" step="0.01" value="${globalConfig.shrinkUpLeftRatio}"/></label><br/>
+    <label>Up Shift X:     <input id="cfg-shrink-up-dx"     type="number"         value="${globalConfig.shrinkUpLeftDX}"/></label><br/>
+    <label>Up Shift Y:     <input id="cfg-shrink-up-dy"     type="number"         value="${globalConfig.shrinkUpLeftDY}"/></label><br/>
+    <label>Up‐Left Ratio:  <input id="cfg-shrink-ul-ratio"  type="number" step="0.01" value="${globalConfig.shrinkUpRatio}"/></label><br/>
+    <label>Up‐Left Shift X:<input id="cfg-shrink-ul-dx"     type="number"         value="${globalConfig.shrinkUpDX}"/></label><br/>
+    <label>Up‐Left Shift Y:<input id="cfg-shrink-ul-dy"     type="number"         value="${globalConfig.shrinkUpDY}"/></label><br/>
             <button id="apply-btn">Apply</button>
         `;
         document.body.appendChild(configPanel);
@@ -268,12 +269,12 @@
             gridY        = parseInt(configPanel.querySelector('#cfg-gridY').value, 10);
             saveLayout();
             // read & save global shrink/shift
-            globalConfig.shrinkUpRatio     = parseFloat(configPanel.querySelector('#cfg-shrink-up-ratio').value);
-            globalConfig.shrinkUpDX        = parseInt  (configPanel.querySelector('#cfg-shrink-up-dx').value, 10);
-            globalConfig.shrinkUpDY        = parseInt  (configPanel.querySelector('#cfg-shrink-up-dy').value, 10);
-            globalConfig.shrinkUpLeftRatio = parseFloat(configPanel.querySelector('#cfg-shrink-ul-ratio').value);
-            globalConfig.shrinkUpLeftDX    = parseInt  (configPanel.querySelector('#cfg-shrink-ul-dx').value, 10);
-            globalConfig.shrinkUpLeftDY    = parseInt  (configPanel.querySelector('#cfg-shrink-ul-dy').value, 10);
+            globalConfig.shrinkUpLeftRatio     = parseFloat(configPanel.querySelector('#cfg-shrink-up-ratio').value);
+            globalConfig.shrinkUpLeftDX        = parseInt  (configPanel.querySelector('#cfg-shrink-up-dx').value, 10);
+            globalConfig.shrinkUpLeftDY        = parseInt  (configPanel.querySelector('#cfg-shrink-up-dy').value, 10);
+            globalConfig.shrinkUpRatio = parseFloat(configPanel.querySelector('#cfg-shrink-ul-ratio').value);
+            globalConfig.shrinkUpDX    = parseInt  (configPanel.querySelector('#cfg-shrink-ul-dx').value, 10);
+            globalConfig.shrinkUpDY    = parseInt  (configPanel.querySelector('#cfg-shrink-ul-dy').value, 10);
             saveGlobalConfig();
             createGrid();
         });
