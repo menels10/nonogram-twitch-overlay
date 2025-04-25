@@ -173,7 +173,9 @@
         });
         document.addEventListener('mouseup', () => isDragging = false);
 
-        canvas.addEventListener('click', (e) => {
+        canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent selecting text or opening context menu
+
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
             const scaleY = canvas.height / rect.height;
@@ -187,12 +189,23 @@
             const oy = canvas.height - cellSize * size - anchorY;
             const c = Math.floor((x - ox) / cellSize);
             const r = Math.floor((y - oy) / cellSize);
-            if (r >= 0 && r < size && c >= 0 && c < size) {
-                cellStates[r][c] = +!cellStates[r][c];
-            }
-        });
-    }
 
+            if (r >= 0 && r < size && c >= 0 && c < size) {
+                if (e.button === 0) {
+                    // Left click
+                    cellStates[r][c] = cellStates[r][c] === 1 ? 0 : 1;
+                } else if (e.button === 2) {
+                    // Right click
+                    cellStates[r][c] = cellStates[r][c] === 2 ? 0 : 2;
+                }
+            }
+
+        });
+
+        // ⚡ Separate from the above!
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+});}
 function createMainButtons() {
     const container = document.createElement('div');
     container.id = 'button-container';
