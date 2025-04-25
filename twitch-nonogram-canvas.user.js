@@ -43,6 +43,7 @@
     }
     function initCells() {
         cellStates = Array.from({ length: size }, () => Array(size).fill(0));
+        lastExported = new Set(); // ← This is the fix
     }
 
     function exportCells() {
@@ -216,36 +217,66 @@ function createMainButtons() {
         right: 0;
         display: flex;
         justify-content: center;
+        align-items: center;
         gap: 8px;
-        padding: 6px;
-        background: rgba(255, 255, 255, 0.9);
-        border-top: 1px solid #ccc;
+        padding: 6px 0;
         z-index: 10001;
+        pointer-events: auto;
     `;
-    frame.appendChild(container); // <-- attach to frame, not document.body
+    frame.appendChild(container);
 
     const makeBtn = (label, onClick) => {
         const btn = document.createElement('button');
         btn.textContent = label;
         btn.style.cssText = `
             padding: 4px 8px;
-            background: #eee;
-            border: 1px solid #333;
+            background: #fff;
+            border: 1px solid #000;
             border-radius: 3px;
             font-size: 13px;
             color: black;
             cursor: pointer;
+            transition: background 0.2s ease;
         `;
+        btn.onmouseenter = () => btn.style.background = '#f0f0f0';
+        btn.onmouseleave = () => btn.style.background = '#fff';
         btn.onclick = onClick;
         return btn;
     };
 
+    // Export and config buttons
     container.appendChild(makeBtn('Export ✓', exportCells));
-    container.appendChild(makeBtn('⚙️ Config', toggleConfigPanel));
-        container.appendChild(makeBtn('Zoom -', () => { zoomFactor = Math.max(0.1, zoomFactor * 0.9); updateCanvasSize(); }));
-        container.appendChild(makeBtn('Zoom +', () => { zoomFactor = zoomFactor * 1.1; updateCanvasSize(); }));
-        container.appendChild(makeBtn('↺ Zoom 1', () => { zoomFactor = 1.0; updateCanvasSize(); }));
-    }
+    container.appendChild(makeBtn('⚙️', toggleConfigPanel));
+
+    // Grouped zoom buttons
+    const zoomGroup = document.createElement('div');
+    zoomGroup.style.cssText = `
+        display: flex;
+        gap: 4px;
+        border: 1px solid #000;
+        border-radius: 3px;
+        padding: 2px 4px;
+        background: transparent;
+    `;
+
+    zoomGroup.appendChild(makeBtn('−', () => {
+        zoomFactor = Math.max(0.1, zoomFactor * 0.9);
+        updateCanvasSize();
+    }));
+
+    zoomGroup.appendChild(makeBtn('+', () => {
+        zoomFactor = zoomFactor * 1.1;
+        updateCanvasSize();
+    }));
+
+    zoomGroup.appendChild(makeBtn('1×', () => {
+        zoomFactor = 1.0;
+        updateCanvasSize();
+    }));
+
+    container.appendChild(zoomGroup);
+}
+
 
 
     function createConfigPanel() {
