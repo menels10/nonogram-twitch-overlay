@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      3.1
 // @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
-// @author       You
+// @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-idle
