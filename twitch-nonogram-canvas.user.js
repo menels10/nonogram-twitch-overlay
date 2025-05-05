@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas 2.0 (fixed)
+// @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      3.1
 // @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
 // @author       You
 // @match        https://www.twitch.tv/goki*
@@ -21,6 +21,39 @@
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
     let canvas, ctx, frame, isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
     let lastExported = new Set(), cellStates = [];
+    const cellSizeTable = {
+        "4_1_11_11": 90.47, "4_2_11_11": 85.2,
+        "5_1_11_11": 72.19, "5_2_11_11": 68.35, "5_3_11_11": 64.35,
+        "6_1_11_11": 60.32, "6_2_11_11": 57.12, "6_3_11_11": 52.0,
+        "7_1_11_11": 51.57, "7_2_11_11": 48.96, "7_3_11_11": 46.29, "7_4_11_11": 43.68,
+        "8_1_11_11": 45.24, "8_2_11_11": 43.04, "8_3_11_11": 40.75, "8_4_11_11": 38.59,
+        "9_1_10_10": 40.42, "9_2_10_10": 38.55, "9_3_10_10": 36.61, "9_4_10_10": 34.74, "9_5_10_10": 32.81,
+        "10_1_10_10": 36.48, "10_2_10_10": 34.69, "10_3_10_10": 33.03, "10_4_10_10": 31.27, "10_5_10_10": 28.09,
+        "11_1_10_10": 33.16, "11_2_10_10": 31.54, "11_3_10_10": 30.14, "11_4_10_10": 28.70,
+        "11_5_10_10": 27.12, "11_6_10_10": 25.53,
+        "12_1_10_10": 30.4, "12_2_10_10": 29.07, "12_3_10_10": 27.63, "12_4_10_10": 25.07,
+        "12_5_10_10": 24.86, "12_6_10_10": 23.5,
+        "13_1_10_10": 28.06, "13_2_10_10": 26.96, "13_3_10_10": 25.67, "13_4_10_10": 24.45,
+        "13_5_10_10": 23.24, "13_6_10_10": 22.05, "13_7_10_10": 20.82,
+        "14_1_10_10": 26.13, "14_2_10_10": 24.96, "14_3_10_10": 23.84, "14_4_10_10": 22.68,
+        "14_5_10_10": 21.58, "14_6_10_10": 20.39, "14_7_10_10": 19.28,
+        "15_1_10_10": 24.38, "15_2_10_10": 23.43, "15_3_10_10": 22.39, "15_4_10_10": 21.36,
+        "15_5_10_10": 20.32, "15_6_10_10": 19.35, "15_7_10_10": 18.31, "15_8_10_10": 17.27,
+        "16_1_10_10": 22.92, "16_2_10_10": 22.03, "16_3_10_10": 21.13, "16_4_10_10": 20.21,
+        "16_5_10_10": 19.29, "16_6_10_10": 18.36, "16_7_10_10": 17.43, "16_8_10_10": 16.52,
+        "17_1_10_10": 21.57, "17_2_10_10": 20.73, "17_3_10_10": 19.88, "17_4_10_10": 19.02,
+        "17_5_10_10": 18.15, "17_6_10_10": 17.28, "17_7_10_10": 16.4, "17_8_10_10": 15.54,
+        "17_9_10_10": 14.76,
+        "18_1_10_10": 20.42, "18_2_10_10": 19.64, "18_3_10_10": 18.89, "18_4_10_10": 18.13,
+        "18_5_10_10": 17.36, "18_6_10_10": 16.52, "18_7_10_10": 15.75, "18_8_10_10": 14.97,
+        "18_9_10_10": 14.26,
+        "19_1_10_10": 19.35, "19_2_10_10": 18.68, "19_3_10_10": 18.02, "19_4_10_10": 17.29,
+        "19_5_10_10": 16.6, "19_6_10_10": 15.9, "19_7_10_10": 15.21, "19_8_10_10": 14.46,
+        "19_9_10_10": 13.74, "19_10_10_10": 13.07,
+        "20_1_10_10": 18.43, "20_2_10_10": 17.75, "20_3_10_10": 17.12, "20_4_10_10": 16.43,
+        "20_5_10_10": 15.77, "20_6_10_10": 15.1, "20_7_10_10": 14.45, "20_8_10_10": 13.74,
+        "20_9_10_10": 13.12, "20_10_10_10": 12.42
+    };
 
     function getKey(sz, rc, cc) {
         return `${sz}x${rc}x${cc}`;
@@ -70,7 +103,16 @@
         const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
         const clueH = 30 * colClueCount + 5;
         const gridSize = Math.min(cw - clueW, ch - clueH);
-        const cellSize = (gridSize + fineTune) * ratio / size;
+        const key = `${size}_${colClueCount}_${anchorX}_${anchorY}`;
+        let cellSize = cellSizeTable[key];
+        if (cellSize === undefined) {
+            console.warn(`Missing cell size for key: ${key}, falling back to default formula`);
+            const gridSize = Math.min(cw - clueW, ch - clueH);
+            cellSize = (gridSize + fineTune) / size;
+        } else {
+            cellSize = (cellSize * size + fineTune) / size;
+        }
+
         const ox = cw - cellSize * size - anchorX;
         const oy = ch - cellSize * size - anchorY;
 
@@ -94,7 +136,15 @@
     }
 
     function drawROI() {
-        const video = document.querySelector('video');
+        const videos = document.querySelectorAll('video');
+        let video = null;
+        for (let vi = videos.length - 1; vi >= 0; vi--) {
+            if (videos[vi].readyState >= 2) {
+                video = videos[vi];
+                break;
+            }
+        }
+        if (!video) return;
         if (!video || video.readyState < 2) return;
 
         const roiWidth = video.videoWidth * roiWidthPercent;
@@ -302,7 +352,6 @@ function createMainButtons() {
             <label>Size: <input id="cfg-size" type="number" value="${size}" /></label><br/>
             <label>Row Clues: <input id="cfg-rows" type="number" value="${rowClueCount}" /></label><br/>
             <label>Col Clues: <input id="cfg-cols" type="number" value="${colClueCount}" /></label><br/>
-            <label>Scale: <input id="cfg-ratio" type="number" value="${ratio}" step="0.01" /></label><br/>
             <label>Fine Tune: <input id="cfg-fine" type="number" value="${fineTune}" /></label><br/>
             <label>Anchor X: <input id="cfg-anchorX" type="number" value="${anchorX}" /></label><br/>
             <label>Anchor Y: <input id="cfg-anchorY" type="number" value="${anchorY}" /></label><br/>
@@ -378,12 +427,6 @@ function createControlPanel() {
             get: () => colClueCount,
             dec: () => { disableShrinks(); colClueCount = Math.max(1, colClueCount - 1); loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); },
             inc: () => { disableShrinks(); colClueCount++; loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); }
-        },
-        {
-            key: 'scale', label: 'Scale',
-            get: () => ratio.toFixed(3),
-            dec: () => { disableShrinks(); ratio = Math.max(0.01, +(ratio - 0.01).toFixed(3)); saveLayout(); updateCanvasSize(); updateAllLabels(); },
-            inc: () => { disableShrinks(); ratio = +(ratio + 0.01).toFixed(3); saveLayout(); updateCanvasSize(); updateAllLabels(); }
         },
         {
             key: 'fine', label: 'Fine tune',
