@@ -21,44 +21,131 @@
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
     let canvas, ctx, frame, isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
     let lastExported = new Set(), cellStates = [];
-    const cellSizeTable = {
-        "4_1_11_11": 90.47, "4_2_11_11": 85.2,
-        "5_1_11_11": 72.19, "5_2_11_11": 68.35, "5_3_11_11": 64.35,
-        "6_1_11_11": 60.32, "6_2_11_11": 57.12, "6_3_11_11": 52.0,
-        "7_1_11_11": 51.57, "7_2_11_11": 48.96, "7_3_11_11": 46.29, "7_4_11_11": 43.68,
-        "8_1_11_11": 45.24, "8_2_11_11": 43.04, "8_3_11_11": 40.75, "8_4_11_11": 38.59,
-        "9_1_10_10": 40.42, "9_2_10_10": 38.55, "9_3_10_10": 36.61, "9_4_10_10": 34.74, "9_5_10_10": 32.81,
-        "10_1_10_10": 36.48, "10_2_10_10": 34.69, "10_3_10_10": 33.03, "10_4_10_10": 31.27, "10_5_10_10": 28.09,
-        "11_1_10_10": 33.16, "11_2_10_10": 31.54, "11_3_10_10": 30.14, "11_4_10_10": 28.70,
-        "11_5_10_10": 27.12, "11_6_10_10": 25.53,
-        "12_1_10_10": 30.4, "12_2_10_10": 29.07, "12_3_10_10": 27.63, "12_4_10_10": 25.07,
-        "12_5_10_10": 24.86, "12_6_10_10": 23.5,
-        "13_1_10_10": 28.06, "13_2_10_10": 26.96, "13_3_10_10": 25.67, "13_4_10_10": 24.45,
-        "13_5_10_10": 23.24, "13_6_10_10": 22.05, "13_7_10_10": 20.82,
-        "14_1_10_10": 26.13, "14_2_10_10": 24.96, "14_3_10_10": 23.84, "14_4_10_10": 22.68,
-        "14_5_10_10": 21.58, "14_6_10_10": 20.39, "14_7_10_10": 19.28,
-        "15_1_10_10": 24.38, "15_2_10_10": 23.43, "15_3_10_10": 22.39, "15_4_10_10": 21.36,
-        "15_5_10_10": 20.32, "15_6_10_10": 19.35, "15_7_10_10": 18.31, "15_8_10_10": 17.27,
-        "16_1_10_10": 22.92, "16_2_10_10": 22.03, "16_3_10_10": 21.13, "16_4_10_10": 20.21,
-        "16_5_10_10": 19.29, "16_6_10_10": 18.36, "16_7_10_10": 17.43, "16_8_10_10": 16.52,
-        "17_1_10_10": 21.57, "17_2_10_10": 20.73, "17_3_10_10": 19.88, "17_4_10_10": 19.02,
-        "17_5_10_10": 18.15, "17_6_10_10": 17.28, "17_7_10_10": 16.4, "17_8_10_10": 15.54,
-        "17_9_10_10": 14.76,
-        "18_1_10_10": 20.42, "18_2_10_10": 19.64, "18_3_10_10": 18.89, "18_4_10_10": 18.13,
-        "18_5_10_10": 17.36, "18_6_10_10": 16.52, "18_7_10_10": 15.75, "18_8_10_10": 14.97,
-        "18_9_10_10": 14.26,
-        "19_1_10_10": 19.35, "19_2_10_10": 18.68, "19_3_10_10": 18.02, "19_4_10_10": 17.29,
-        "19_5_10_10": 16.6, "19_6_10_10": 15.9, "19_7_10_10": 15.21, "19_8_10_10": 14.46,
-        "19_9_10_10": 13.74, "19_10_10_10": 13.07,
-        "20_1_10_10": 18.43, "20_2_10_10": 17.75, "20_3_10_10": 17.12, "20_4_10_10": 16.43,
-        "20_5_10_10": 15.77, "20_6_10_10": 15.1, "20_7_10_10": 14.45, "20_8_10_10": 13.74,
-        "20_9_10_10": 13.12, "20_10_10_10": 12.42
+    const sizeLookup = {
+        "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
+        "4_2": { cellSize: 85.2, anchorX: 11, anchorY: 11 },
+        "5_1": { cellSize: 72.19, anchorX: 11, anchorY: 11 },
+        "5_2": { cellSize: 68.35, anchorX: 11, anchorY: 11 },
+        "5_3": { cellSize: 64.35, anchorX: 11, anchorY: 11 },
+        "6_1": { cellSize: 60.32, anchorX: 11, anchorY: 11 },
+        "6_2": { cellSize: 57.12, anchorX: 11, anchorY: 11 },
+        "6_3": { cellSize: 52.0, anchorX: 11, anchorY: 11 },
+        "7_1": { cellSize: 51.57, anchorX: 11, anchorY: 11 },
+        "7_2": { cellSize: 48.96, anchorX: 11, anchorY: 11 },
+        "7_3": { cellSize: 46.29, anchorX: 11, anchorY: 11 },
+        "7_4": { cellSize: 43.68, anchorX: 11, anchorY: 11 },
+        "8_1": { cellSize: 45.24, anchorX: 11, anchorY: 11 },
+        "8_2": { cellSize: 43.04, anchorX: 11, anchorY: 11 },
+        "8_3": { cellSize: 40.75, anchorX: 11, anchorY: 11 },
+        "8_4": { cellSize: 38.59, anchorX: 11, anchorY: 11 },
+        "9_1": { cellSize: 40.42, anchorX: 10, anchorY: 10 },
+        "9_2": { cellSize: 38.55, anchorX: 10, anchorY: 10 },
+        "9_3": { cellSize: 36.61, anchorX: 10, anchorY: 10 },
+        "9_4": { cellSize: 34.74, anchorX: 10, anchorY: 10 },
+        "9_5": { cellSize: 32.81, anchorX: 10, anchorY: 10 },
+        "10_1": { cellSize: 36.48, anchorX: 10, anchorY: 10 },
+        "10_2": { cellSize: 34.69, anchorX: 10, anchorY: 10 },
+        "10_3": { cellSize: 33.03, anchorX: 10, anchorY: 10 },
+        "10_4": { cellSize: 31.27, anchorX: 10, anchorY: 10 },
+        "10_5": { cellSize: 28.09, anchorX: 10, anchorY: 10 },
+        "11_1": { cellSize: 33.16, anchorX: 10, anchorY: 10 },
+        "11_2": { cellSize: 31.54, anchorX: 10, anchorY: 10 },
+        "11_3": { cellSize: 30.14, anchorX: 10, anchorY: 10 },
+        "11_4": { cellSize: 28.7, anchorX: 10, anchorY: 10 },
+        "11_5": { cellSize: 27.12, anchorX: 10, anchorY: 10 },
+        "11_6": { cellSize: 25.53, anchorX: 10, anchorY: 10 },
+        "12_1": { cellSize: 30.4, anchorX: 10, anchorY: 10 },
+        "12_2": { cellSize: 29.07, anchorX: 10, anchorY: 10 },
+        "12_3": { cellSize: 27.63, anchorX: 10, anchorY: 10 },
+        "12_4": { cellSize: 25.07, anchorX: 10, anchorY: 10 },
+        "12_5": { cellSize: 24.86, anchorX: 10, anchorY: 10 },
+        "12_6": { cellSize: 23.5, anchorX: 10, anchorY: 10 },
+        "13_1": { cellSize: 28.06, anchorX: 10, anchorY: 10 },
+        "13_2": { cellSize: 26.96, anchorX: 10, anchorY: 10 },
+        "13_3": { cellSize: 25.67, anchorX: 10, anchorY: 10 },
+        "13_4": { cellSize: 24.45, anchorX: 10, anchorY: 10 },
+        "13_5": { cellSize: 23.24, anchorX: 10, anchorY: 10 },
+        "13_6": { cellSize: 22.05, anchorX: 10, anchorY: 10 },
+        "13_7": { cellSize: 20.82, anchorX: 10, anchorY: 10 },
+        "14_1": { cellSize: 26.13, anchorX: 10, anchorY: 10 },
+        "14_2": { cellSize: 24.96, anchorX: 10, anchorY: 10 },
+        "14_3": { cellSize: 23.84, anchorX: 10, anchorY: 10 },
+        "14_4": { cellSize: 22.68, anchorX: 10, anchorY: 10 },
+        "14_5": { cellSize: 21.58, anchorX: 10, anchorY: 10 },
+        "14_6": { cellSize: 20.39, anchorX: 10, anchorY: 10 },
+        "14_7": { cellSize: 19.28, anchorX: 10, anchorY: 10 },
+        "15_1": { cellSize: 24.38, anchorX: 10, anchorY: 10 },
+        "15_2": { cellSize: 23.43, anchorX: 10, anchorY: 10 },
+        "15_3": { cellSize: 22.39, anchorX: 10, anchorY: 10 },
+        "15_4": { cellSize: 21.36, anchorX: 10, anchorY: 10 },
+        "15_5": { cellSize: 20.32, anchorX: 10, anchorY: 10 },
+        "15_6": { cellSize: 19.35, anchorX: 10, anchorY: 10 },
+        "15_7": { cellSize: 18.31, anchorX: 10, anchorY: 10 },
+        "15_8": { cellSize: 17.27, anchorX: 10, anchorY: 10 },
+        "16_1": { cellSize: 22.92, anchorX: 10, anchorY: 10 },
+        "16_2": { cellSize: 22.03, anchorX: 10, anchorY: 10 },
+        "16_3": { cellSize: 21.13, anchorX: 10, anchorY: 10 },
+        "16_4": { cellSize: 20.21, anchorX: 10, anchorY: 10 },
+        "16_5": { cellSize: 19.29, anchorX: 10, anchorY: 10 },
+        "16_6": { cellSize: 18.36, anchorX: 10, anchorY: 10 },
+        "16_7": { cellSize: 17.43, anchorX: 10, anchorY: 10 },
+        "16_8": { cellSize: 16.52, anchorX: 10, anchorY: 10 },
+        "17_1": { cellSize: 21.57, anchorX: 10, anchorY: 10 },
+        "17_2": { cellSize: 20.73, anchorX: 10, anchorY: 10 },
+        "17_3": { cellSize: 19.88, anchorX: 10, anchorY: 10 },
+        "17_4": { cellSize: 19.02, anchorX: 10, anchorY: 10 },
+        "17_5": { cellSize: 18.15, anchorX: 10, anchorY: 10 },
+        "17_6": { cellSize: 17.28, anchorX: 10, anchorY: 10 },
+        "17_7": { cellSize: 16.4, anchorX: 10, anchorY: 10 },
+        "17_8": { cellSize: 15.54, anchorX: 10, anchorY: 10 },
+        "17_9": { cellSize: 14.76, anchorX: 10, anchorY: 10 },
+        "18_1": { cellSize: 20.42, anchorX: 10, anchorY: 10 },
+        "18_2": { cellSize: 19.64, anchorX: 10, anchorY: 10 },
+        "18_3": { cellSize: 18.89, anchorX: 10, anchorY: 10 },
+        "18_4": { cellSize: 18.13, anchorX: 10, anchorY: 10 },
+        "18_5": { cellSize: 17.36, anchorX: 10, anchorY: 10 },
+        "18_6": { cellSize: 16.52, anchorX: 10, anchorY: 10 },
+        "18_7": { cellSize: 15.75, anchorX: 10, anchorY: 10 },
+        "18_8": { cellSize: 14.97, anchorX: 10, anchorY: 10 },
+        "18_9": { cellSize: 14.26, anchorX: 10, anchorY: 10 },
+        "19_1": { cellSize: 19.35, anchorX: 10, anchorY: 10 },
+        "19_2": { cellSize: 18.68, anchorX: 10, anchorY: 10 },
+        "19_3": { cellSize: 18.02, anchorX: 10, anchorY: 10 },
+        "19_4": { cellSize: 17.29, anchorX: 10, anchorY: 10 },
+        "19_5": { cellSize: 16.6, anchorX: 10, anchorY: 10 },
+        "19_6": { cellSize: 15.9, anchorX: 10, anchorY: 10 },
+        "19_7": { cellSize: 15.21, anchorX: 10, anchorY: 10 },
+        "19_8": { cellSize: 14.46, anchorX: 10, anchorY: 10 },
+        "19_9": { cellSize: 13.74, anchorX: 10, anchorY: 10 },
+        "19_10": { cellSize: 13.07, anchorX: 10, anchorY: 10 },
+        "20_1": { cellSize: 18.43, anchorX: 10, anchorY: 10 },
+        "20_2": { cellSize: 17.75, anchorX: 10, anchorY: 10 },
+        "20_3": { cellSize: 17.12, anchorX: 10, anchorY: 10 },
+        "20_4": { cellSize: 16.43, anchorX: 10, anchorY: 10 },
+        "20_5": { cellSize: 15.77, anchorX: 10, anchorY: 10 },
+        "20_6": { cellSize: 15.1, anchorX: 10, anchorY: 10 },
+        "20_7": { cellSize: 14.45, anchorX: 10, anchorY: 10 },
+        "20_8": { cellSize: 13.74, anchorX: 10, anchorY: 10 },
+        "20_9": { cellSize: 13.12, anchorX: 10, anchorY: 10 },
+        "20_10": { cellSize: 12.42, anchorX: 10, anchorY: 10 }
     };
 
     function getKey(sz, rc, cc) {
         return `${sz}x${rc}x${cc}`;
     }
-
+    function getLayoutSettings(size, colClueLength) {
+        const key = `${size}_${colClueLength}`;
+        const entry = sizeLookup[key];
+        if (!entry) {
+            console.warn(`No layout settings found for size=${size}, colClueLength=${colClueLength}`);
+            return null;
+        }
+        return {
+            cellSize: entry.cellSize,
+            anchorX: entry.anchorX,
+            anchorY: entry.anchorY,
+        };
+    }
     function saveLayout() {
         const key = getKey(size, rowClueCount, colClueCount);
         configs[key] = { ratio, anchorX, anchorY, fineTune, size, rowClueCount, colClueCount };
@@ -103,18 +190,21 @@
         const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
         const clueH = 30 * colClueCount + 5;
         const gridSize = Math.min(cw - clueW, ch - clueH);
-        const key = `${size}_${colClueCount}_${anchorX}_${anchorY}`;
-        let cellSize = cellSizeTable[key];
-        if (cellSize === undefined) {
-            console.warn(`Missing cell size for key: ${key}, falling back to default formula`);
+        const layout = getLayoutSettings(size, colClueCount);
+        let cellSize, ox, oy;
+
+        if (layout) {
+            anchorX = layout.anchorX;
+            anchorY = layout.anchorY;
+            cellSize = (layout.cellSize * size + fineTune) / size;
+        } else {
+            console.warn(`Missing layout for size=${size}, colClueCount=${colClueCount}. Falling back.`);
             const gridSize = Math.min(cw - clueW, ch - clueH);
             cellSize = (gridSize + fineTune) / size;
-        } else {
-            cellSize = (cellSize * size + fineTune) / size;
         }
 
-        const ox = cw - cellSize * size - anchorX;
-        const oy = ch - cellSize * size - anchorY;
+        ox = cw - cellSize * size - anchorX;
+        oy = ch - cellSize * size - anchorY;
 
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
@@ -527,4 +617,3 @@ function createControlPanel() {
         createControlPanel();
         render();
     });
-})();
