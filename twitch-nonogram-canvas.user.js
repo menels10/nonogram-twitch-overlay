@@ -325,12 +325,20 @@
             const scaleY = canvas.height / rect.height;
             const x = (e.clientX - rect.left) * scaleX;
             const y = (e.clientY - rect.top) * scaleY;
-            const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
-            const clueH = 30 * colClueCount + 5;
-            const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
-            const cellSize = (gridSize + fineTune) * ratio / size;
-            const ox = canvas.width - cellSize * size - anchorX;
-            const oy = canvas.height - cellSize * size - anchorY;
+            const layout = getLayoutSettings(size, colClueCount);
+            let cellSize, ox, oy;
+            if (layout) {
+                anchorX = layout.anchorX;
+                anchorY = layout.anchorY;
+                cellSize = (layout.cellSize * size + fineTune) / size;
+            } else {
+                const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
+                const clueH = 30 * colClueCount + 5;
+                const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
+                cellSize = (gridSize + fineTune) / size;
+            }
+            ox = canvas.width - cellSize * size - anchorX;
+            oy = canvas.height - cellSize * size - anchorY;
             const c = Math.floor((x - ox) / cellSize);
             const r = Math.floor((y - oy) / cellSize);
 
