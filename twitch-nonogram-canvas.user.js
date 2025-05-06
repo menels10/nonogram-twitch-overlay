@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.2
 // @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
+
 (function () {
     'use strict';
 
@@ -204,7 +205,7 @@
 
         ox = cw - cellSize * size - anchorX;
         oy = ch - cellSize * size - anchorY;
-
+        console.log(`Drawing grid: size=${size}, colClues=${colClueCount}, cellSize=${cellSize.toFixed(2)}, anchorX=${anchorX}, anchorY=${anchorY}`);
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
 
@@ -329,6 +330,7 @@
             const oy = canvas.height - cellSize * size - anchorY;
             const c = Math.floor((x - ox) / cellSize);
             const r = Math.floor((y - oy) / cellSize);
+
 
             if (r >= 0 && r < size && c >= 0 && c < size) {
                 if (e.button === 0) {
