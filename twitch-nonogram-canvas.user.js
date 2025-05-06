@@ -617,3 +617,4 @@ function createControlPanel() {
         createControlPanel();
         render();
     });
+})();
