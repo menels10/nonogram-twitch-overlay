@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.1
 // @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -152,13 +152,16 @@
         localStorage.setItem('nonogramConfigMap', JSON.stringify(configs));
     }
     function loadLayout() {
+        const layout = getLayoutSettings(size, colClueCount);
+        if (layout) {
+            anchorX = layout.anchorX;
+            anchorY = layout.anchorY;
+        }
+
         const key = getKey(size, rowClueCount, colClueCount);
         const saved = configs[key];
         if (saved) {
-            ratio = saved.ratio ?? ratio;
             fineTune = saved.fineTune ?? fineTune;
-            anchorX = saved.anchorX ?? anchorX;
-            anchorY = saved.anchorY ?? anchorY;
         }
     }
     function initCells() {
