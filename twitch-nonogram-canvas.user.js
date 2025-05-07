@@ -7,6 +7,7 @@
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-idle
+ // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram-canvas.user.js
 // ==/UserScript==
 
 (function () {
