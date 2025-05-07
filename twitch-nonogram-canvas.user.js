@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.4
-// @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
+// @version      3.5
+// @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
 // @grant        none
@@ -20,7 +20,9 @@
     let aspectRatio = 800 / 630;
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
     let canvas, ctx, frame, isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
-    let lastExported = new Set(), cellStates = [];
+    let lastExported = new Set(), lastExportedWhite = new Set(), cellStates = [];
+
+
     const sizeLookup = {
         "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
         "4_2": { cellSize: 85.2, anchorX: 11, anchorY: 11 },
@@ -167,6 +169,7 @@
     function initCells() {
         cellStates = Array.from({ length: size }, () => Array(size).fill(0));
         lastExported = new Set(); // ← This is the fix
+        lastExportedWhite = new Set();
     }
 
     function exportCells() {
@@ -184,6 +187,24 @@
         });
         if (coords.length) navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
     }
+    function exportWhiteCells() {
+        const coords = [];
+        cellStates.forEach((row, r) => {
+            row.forEach((s, c) => {
+                if (s === 2) {
+                    const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+                    if (!lastExportedWhite.has(coord)) {
+                        coords.push(coord);
+                        lastExportedWhite.add(coord);
+                    }
+                }
+            });
+        });
+        if (coords.length) {
+            navigator.clipboard.writeText(`!empty ${coords.join(' ')}`);
+        }
+    }
+
     function disableShrinks() {
         // Placeholder: define this if needed later
     }
@@ -385,7 +406,8 @@ function createMainButtons() {
     };
 
     // Export and config buttons
-    container.appendChild(makeBtn('Export ✓', exportCells));
+    container.appendChild(makeBtn('Export black', exportCells));
+    container.appendChild(makeBtn('Export white', exportWhiteCells));
     container.appendChild(makeBtn('⚙️', toggleConfigPanel));
 
     // Grouped zoom buttons
@@ -440,12 +462,10 @@ function createMainButtons() {
 `;
         panel.innerHTML = `
             <label>Size: <input id="cfg-size" type="number" value="${size}" /></label><br/>
-            <label>Row Clues: <input id="cfg-rows" type="number" value="${rowClueCount}" /></label><br/>
             <label>Col Clues: <input id="cfg-cols" type="number" value="${colClueCount}" /></label><br/>
             <label>Fine Tune: <input id="cfg-fine" type="number" value="${fineTune}" /></label><br/>
             <label>Anchor X: <input id="cfg-anchorX" type="number" value="${anchorX}" /></label><br/>
             <label>Anchor Y: <input id="cfg-anchorY" type="number" value="${anchorY}" /></label><br/>
-            <label>Zoom: <input id="cfg-zoom" type="number" value="${zoomFactor}" step="0.1" /></label><br/>
             <button id="cfg-apply">Apply</button>
             <button id="cfg-close">Close</button>
         `;
@@ -453,13 +473,11 @@ function createMainButtons() {
 
         panel.querySelector('#cfg-apply').onclick = () => {
             size = +panel.querySelector('#cfg-size').value;
-            rowClueCount = +panel.querySelector('#cfg-rows').value;
             colClueCount = +panel.querySelector('#cfg-cols').value;
             ratio = +panel.querySelector('#cfg-ratio').value;
             fineTune = +panel.querySelector('#cfg-fine').value;
             anchorX = +panel.querySelector('#cfg-anchorX').value;
             anchorY = +panel.querySelector('#cfg-anchorY').value;
-            zoomFactor = +panel.querySelector('#cfg-zoom').value;
             saveLayout();
             initCells();
             updateCanvasSize();
@@ -505,12 +523,6 @@ function createControlPanel() {
             get: () => size,
             dec: () => { disableShrinks(); size = Math.max(1, size - 1); loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); },
             inc: () => { disableShrinks(); size++; loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); }
-        },
-        {
-            key: 'rows', label: 'Row clues',
-            get: () => rowClueCount,
-            dec: () => { disableShrinks(); rowClueCount = Math.max(1, rowClueCount - 1); loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); },
-            inc: () => { disableShrinks(); rowClueCount++; loadLayout(); initCells(); updateCanvasSize(); updateAllLabels(); }
         },
         {
             key: 'cols', label: 'Col clues',
