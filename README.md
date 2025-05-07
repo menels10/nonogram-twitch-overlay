@@ -1,36 +1,44 @@
-The grid now auto-loads with buttons hanging off the right and bottom edges.
+🎮 Twitch Nonogram Grid with Canvas 3.0 (Fixed)
+A draggable nonogram puzzle overlay for Twitch streams, complete with canvas rendering, zoom controls, and nonogram solving mechanism 
 
-Drag & Position
-Whenever the grid expands or shrinks, it always grows toward the top-left—so we’re anchoring it by the bottom-right corner.
+📦 Features
+🖼️ Draggable nonogram grid overlay
 
-How to Use
+✍️ Interactive grid: left-click to fill, right-click to mark as empty
 
-Set “Grid Size” to your puzzle dimensions (e.g. 5×5).
+🔍 Zoom controls (−, +, 1×)
 
-Enter your row- and column-clue lengths (row clues only matter on big grids with 8+ clues).
+📋 "Export ✓" button to copy filled coordinates for !fill Twitch command
 
-Hit Scale to get it roughly in place, then Fine-tune until it’s pixel-perfect.
+🛠 Installation
+Install Tampermonkey in your browser.
 
-Marking Cells
+Add a new userscript and paste in the code.
 
-Left-click to fill (black); click again to clear.
+Visit gokiccoon Twitch stream.
 
-Right-click to mark empty (white); click again to clear.
+🧾 How to Use
+🔲 Grid Interaction
+Left-click on a cell: Toggle black fill (█). A second click clears it.
 
-Exporting Your Progress
+Right-click: Toggle white mark (×). A second click clears it.
 
-Click Export Black Cells to copy just your new black-cell changes to the clipboard.
+"Export ✓": Copies all newly filled (black) cells as !fill a1 b2 c3 ... to your clipboard
 
-⚠️ Don’t double-click—each export only grabs changes since the last one.
+Zoom: Use − / + / 1× to adjust canvas scaling
 
-Sharing in Chat
+🧩 Control Panel (right-side of grid)
+Quick buttons to increase/decrease:
 
-Paste into Twitch chat to use the !fill commands.
+Grid size
 
-Extras
+Row/column clue count
 
-You can hide the Scale and Fine-tune buttons in the Config panel once you’re set.
+Fine tune
 
-There’s also Export/Import JSON for sharing full config presets.
+Reset button to default layout (4x4 with 1 clue)
 
-🧠 Happy nonogram solving!
+🧹 Troubleshooting
+🖥️ No grid visible? Refresh the page, ensure you're on a matching URL (https://www.twitch.tv/goki*)
+
+📋 Export not working? Ensure browser permissions allow clipboard access
