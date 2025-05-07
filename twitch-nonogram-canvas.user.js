@@ -31,7 +31,7 @@
         "5_3": { cellSize: 64.35, anchorX: 11, anchorY: 11 },
         "6_1": { cellSize: 60.32, anchorX: 11, anchorY: 11 },
         "6_2": { cellSize: 57.12, anchorX: 11, anchorY: 11 },
-        "6_3": { cellSize: 52.0, anchorX: 11, anchorY: 11 },
+        "6_3": { cellSize: 54.0, anchorX: 11, anchorY: 11 },
         "7_1": { cellSize: 51.57, anchorX: 11, anchorY: 11 },
         "7_2": { cellSize: 48.96, anchorX: 11, anchorY: 11 },
         "7_3": { cellSize: 46.29, anchorX: 11, anchorY: 11 },
