@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.4
 // @description  Nonogram canvas grid with draggable + ROI support on Twitch stream
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -209,6 +209,8 @@
         ox = cw - cellSize * size - anchorX;
         oy = ch - cellSize * size - anchorY;
         console.log(`Drawing grid: size=${size}, colClues=${colClueCount}, cellSize=${cellSize.toFixed(2)}, anchorX=${anchorX}, anchorY=${anchorY}`);
+        // console.log(`Canvas size: width=${canvas.width}, height=${canvas.height}`);
+
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
 
@@ -229,54 +231,40 @@
     }
 
     function drawROI() {
-        const videos = document.querySelectorAll('video');
-        let video = null;
-        for (let vi = videos.length - 1; vi >= 0; vi--) {
-            if (videos[vi].readyState >= 2) {
-                video = videos[vi];
-                break;
-            }
-        }
+        const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
         if (!video) return;
-        if (!video || video.readyState < 2) return;
 
-        const roiWidth = video.videoWidth * roiWidthPercent;
-        const roiHeight = video.videoHeight * roiHeightPercent;
-        const roiX = video.videoWidth - roiWidth;
-        const roiY = video.videoHeight - roiHeight;
+        // Get actual video resolution
+        const actualWidth = video.videoWidth;
+        const actualHeight = video.videoHeight;
 
-        if (roiWidth <= 0 || roiHeight <= 0) return;
+        // Calculate ROI dynamically based on actual resolution
+        const roiWidth = actualWidth * roiWidthPercent;
+        const roiHeight = actualHeight * roiHeightPercent;
+        const roiX = actualWidth - roiWidth;
+        const roiY = actualHeight - roiHeight;
 
-        const canvasAspect = canvas.width / canvas.height;
-        aspectRatio = roiWidth / roiHeight;
-        let drawWidth = canvas.width, drawHeight = canvas.height, dx = 0, dy = 0;
-
-        if (canvasAspect > aspectRatio) {
-            drawHeight = canvas.height;
-            drawWidth = drawHeight * aspectRatio;
-            dx = (canvas.width - drawWidth) / 2;
-        } else {
-            drawWidth = canvas.width;
-            drawHeight = drawWidth / aspectRatio;
-            dy = (canvas.height - drawHeight) / 2;
-        }
-
-        ctx.drawImage(video, roiX, roiY, roiWidth, roiHeight, dx, dy, drawWidth, drawHeight);
+        // Draw ROI into fixed-size canvas
+        ctx.drawImage(
+            video,
+            roiX, roiY, roiWidth, roiHeight, // source
+            0, 0, canvas.width, canvas.height // destination
+        );
     }
 
+
     function updateCanvasSize() {
-        const video = document.querySelector('video');
-        if (!video || video.readyState < 2) return;
+        // 🔒 Fixed dimensions based on 720p stream expectations
+        const fixedWidth = 428;
+        const fixedHeight = 420;
 
-        const roiWidth = video.videoWidth * roiWidthPercent;
-        const roiHeight = video.videoHeight * roiHeightPercent;
-        canvas.width = roiWidth;
-        canvas.height = roiHeight;
+        canvas.width = fixedWidth;
+        canvas.height = fixedHeight;
 
-        canvas.style.width = `${roiWidth * zoomFactor}px`;
-        canvas.style.height = `${roiHeight * zoomFactor}px`;
-        frame.style.width = `${roiWidth * zoomFactor}px`;
-        frame.style.height = `${roiHeight * zoomFactor + 40}px`;
+        canvas.style.width = `${fixedWidth * zoomFactor}px`;
+        canvas.style.height = `${fixedHeight * zoomFactor}px`;
+        frame.style.width = `${fixedWidth * zoomFactor}px`;
+        frame.style.height = `${fixedHeight * zoomFactor + 40}px`;
 
         createGrid();
         drawROI();
