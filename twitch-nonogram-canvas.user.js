@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.6
+// @version      3.5
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -253,15 +253,15 @@
 
         for (let r = 0; r < size; r++) {
             for (let c = 0; c < size; c++) {
-                //ctx.fillStyle = 'rgba(50, 50, 255, 0.7)';  // Blue with 50% opacity
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // White with 15% opacity
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // black with 30% opacity
+                //ctx.fillStyle = 'rgba(50, 50, 255, 0.7)';  // Blue with 30% opacity
                 const x = ox + c * cellSize;
                 const y = oy + r * cellSize;
                 ctx.strokeRect(x, y, cellSize, cellSize);
                 if (cellStates[r][c] === 1) {
                     ctx.fillRect(x, y, cellSize, cellSize);
                 } else if (cellStates[r][c] === 2) {
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; // White with 15% opacity
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; // White with 40% opacity
                     ctx.fillRect(x, y, cellSize, cellSize);
                     ctx.fillStyle = 'black';
                 }
