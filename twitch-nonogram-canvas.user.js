@@ -6,7 +6,7 @@
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-end
  // @downloadURL  https://menels10.github.io/nonogram-twitch-overlay/twitch-nonogram-canvas.user.js
 // ==/UserScript==
 
@@ -238,7 +238,7 @@
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
         if (hoveredRow >= 0 && hoveredCol >= 0) {
-            ctx.fillStyle = 'rgba(100, 150, 255, 0.25)'; // light blue tint
+            ctx.fillStyle = 'rgba(100, 150, 255, 0.35)'; // light blue tint
             for (let c = 0; c < size; c++) {
                 const x = ox + c * cellSize;
                 const y = oy + hoveredRow * cellSize;
