@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -22,6 +22,8 @@
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
     let canvas, ctx, frame, isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
     let lastExported = new Set(), lastExportedWhite = new Set(), cellStates = [];
+    let hoveredRow = -1;
+    let hoveredCol = -1;
 
 
     const sizeLookup = {
@@ -235,16 +237,31 @@
 
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
+        if (hoveredRow >= 0 && hoveredCol >= 0) {
+            ctx.fillStyle = 'rgba(100, 150, 255, 0.25)'; // light blue tint
+            for (let c = 0; c < size; c++) {
+                const x = ox + c * cellSize;
+                const y = oy + hoveredRow * cellSize;
+                ctx.fillRect(x, y, cellSize, cellSize);
+            }
+            for (let r = 0; r < size; r++) {
+                const x = ox + hoveredCol * cellSize;
+                const y = oy + r * cellSize;
+                ctx.fillRect(x, y, cellSize, cellSize);
+            }
+        }
 
         for (let r = 0; r < size; r++) {
             for (let c = 0; c < size; c++) {
+                //ctx.fillStyle = 'rgba(50, 50, 255, 0.7)';  // Blue with 50% opacity
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; // White with 15% opacity
                 const x = ox + c * cellSize;
                 const y = oy + r * cellSize;
                 ctx.strokeRect(x, y, cellSize, cellSize);
                 if (cellStates[r][c] === 1) {
                     ctx.fillRect(x, y, cellSize, cellSize);
                 } else if (cellStates[r][c] === 2) {
-                    ctx.fillStyle = 'white';
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'; // White with 15% opacity
                     ctx.fillRect(x, y, cellSize, cellSize);
                     ctx.fillStyle = 'black';
                 }
@@ -361,8 +378,42 @@
                     // Right click
                     cellStates[r][c] = cellStates[r][c] === 2 ? 0 : 2;
                 }
+                createGrid(); // ✅ Refresh grid after marking
             }
 
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            const layout = getLayoutSettings(size, colClueCount);
+            let cellSize, ox, oy;
+            if (layout) {
+                anchorX = layout.anchorX;
+                anchorY = layout.anchorY;
+                cellSize = (layout.cellSize * size + fineTune) / size;
+            } else {
+                const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
+                const clueH = 30 * colClueCount + 5;
+                const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
+                cellSize = (gridSize + fineTune) / size;
+            }
+
+            ox = canvas.width - cellSize * size - anchorX;
+            oy = canvas.height - cellSize * size - anchorY;
+            const c = Math.floor((x - ox) / cellSize);
+            const r = Math.floor((y - oy) / cellSize);
+
+            if (r >= 0 && r < size && c >= 0 && c < size) {
+                hoveredRow = r;
+                hoveredCol = c;
+            } else {
+                hoveredRow = -1;
+                hoveredCol = -1;
+            }
         });
 
         // ⚡ Separate from the above!
@@ -409,7 +460,6 @@ function createMainButtons() {
     // Export and config buttons
     container.appendChild(makeBtn('Export black', exportCells));
     container.appendChild(makeBtn('Export white', exportWhiteCells));
-    container.appendChild(makeBtn('⚙️', toggleConfigPanel));
 
     // Grouped zoom buttons
     const zoomGroup = document.createElement('div');
@@ -427,13 +477,15 @@ function createMainButtons() {
         updateCanvasSize();
     }));
 
-    zoomGroup.appendChild(makeBtn('+', () => {
-        zoomFactor = zoomFactor * 1.1;
+
+
+    zoomGroup.appendChild(makeBtn('1× zoom', () => {
+        zoomFactor = 1.0;
         updateCanvasSize();
     }));
 
-    zoomGroup.appendChild(makeBtn('1×', () => {
-        zoomFactor = 1.0;
+    zoomGroup.appendChild(makeBtn('+', () => {
+        zoomFactor = zoomFactor * 1.1;
         updateCanvasSize();
     }));
 
