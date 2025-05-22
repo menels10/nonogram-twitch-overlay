@@ -312,7 +312,7 @@
 
     function updateCanvasSize() {
         // 🔒 Fixed dimensions based on 720p stream expectations
-        const fixedWidth = 428;
+        const fixedWidth = Math.round(428 * (0.36 / 0.335)); // ≈ 459
         const fixedHeight = 420;
 
         canvas.width = fixedWidth;
