@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas 3.0 (fixed)
+// @name         Twitch Nonogram Grid with canvas 
 // @namespace    http://tampermonkey.net/
-// @version      3.6
+// @version      3.7
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -17,7 +17,7 @@
     let size = 4, rowClueCount = 1, colClueCount = 1, ratio = 1.0;
     let anchorX = DEFAULT_CONF.anchorX, anchorY = DEFAULT_CONF.anchorY;
     let zoomFactor = DEFAULT_CONF.zoomFactor, fineTune = DEFAULT_CONF.fineTune;
-    let roiWidthPercent = 0.335, roiHeightPercent = 0.584;
+    let roiWidthPercent = 0.36, roiHeightPercent = 0.584;
     let aspectRatio = 800 / 630;
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
     let canvas, ctx, frame, isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
@@ -207,7 +207,25 @@
             navigator.clipboard.writeText(`!empty ${coords.join(' ')}`);
         }
     }
+    function exportClearCommand() {
+        const letters = 'abcdefghijklmnopqrstuvwxyz';
+        const ranges = [];
 
+        for (let c = 0; c < size; c++) {
+            const col = letters[c];
+            const start = `${col}1`;
+            const end = `${col}${size}`;
+            ranges.push(`${start}-${end}`);
+        }
+
+        const clearCmd = `!clear ${ranges.join(',')}`;
+        try {
+            navigator.clipboard.writeText(clearCmd);
+        } catch (e) {
+            console.warn("Clipboard write failed:", e);
+            alert(clearCmd); // fallback
+        }
+    }
     function disableShrinks() {
         // Placeholder: define this if needed later
     }
@@ -238,7 +256,7 @@
         ctx.strokeStyle = 'cyan';
         ctx.lineWidth = 1;
         if (hoveredRow >= 0 && hoveredCol >= 0) {
-            ctx.fillStyle = 'rgba(100, 150, 255, 0.35)'; // light blue tint
+            ctx.fillStyle = 'rgba(100, 150, 255, 0.25)'; // light blue tint
             for (let c = 0; c < size; c++) {
                 const x = ox + c * cellSize;
                 const y = oy + hoveredRow * cellSize;
@@ -460,6 +478,7 @@ function createMainButtons() {
     // Export and config buttons
     container.appendChild(makeBtn('Export black', exportCells));
     container.appendChild(makeBtn('Export white', exportWhiteCells));
+    container.appendChild(makeBtn('Clean All', exportClearCommand));
 
     // Grouped zoom buttons
     const zoomGroup = document.createElement('div');
