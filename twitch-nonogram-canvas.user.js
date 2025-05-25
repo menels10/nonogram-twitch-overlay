@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      3.75
+// @version      3.8
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -12,7 +12,7 @@
 
 (function () {
     'use strict';
-
+    const SHOW_MINIMIZE_RESTORE_BUTTONS = false; // 🔇 Set to True to enable minimize functions.
     const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.3, fineTune: 0 };
     let size = 4, rowClueCount = 1, colClueCount = 1, ratio = 1.0;
     let anchorX = DEFAULT_CONF.anchorX, anchorY = DEFAULT_CONF.anchorY;
@@ -27,6 +27,9 @@
     let isMarking = false;
     let markValue = 0;       // 1 = black, 2 = white
     let eraseMode = false;   // true if we're unmarking cells
+    let isMinimized = false;
+    let animationFrameId = null;
+    let minimizeBtn;
 
     const sizeLookup = {
         "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
@@ -330,10 +333,79 @@
     }
 
     function render() {
+        if (isMinimized) return; // Pause updates when minimized
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawROI();
         createGrid();
-        requestAnimationFrame(render);
+        animationFrameId = requestAnimationFrame(render);
+    }
+    function minimizeCanvas() {
+        isMinimized = true;
+        cancelAnimationFrame(animationFrameId);
+
+        canvas.style.display = 'none';
+        frame.style.height = '0px';
+        frame.style.width = '0px';
+
+        const ctrl = document.getElementById('control-container');
+        if (ctrl) ctrl.style.display = 'none';
+
+        const btns = document.getElementById('button-container');
+        if (btns) btns.style.display = 'none';
+
+        const cfg = document.getElementById('config-panel');
+        if (cfg) cfg.style.display = 'none'; // 🔧 Hide config panel too
+
+        const restoreBtn = document.getElementById('restore-button');
+        if (restoreBtn) restoreBtn.style.display = 'block';
+        if (minimizeBtn && minimizeBtn.parentElement) {
+            minimizeBtn.remove(); // 🧹 Remove minimize button when collapsed
+        }
+    }
+    function restoreCanvas() {
+        isMinimized = false;
+        canvas.style.display = 'block';
+        updateCanvasSize();
+        render();
+
+        frame.style.height = `${canvas.height * zoomFactor + 40}px`;
+        frame.style.width = `${canvas.width * zoomFactor}px`;
+
+        const ctrl = document.getElementById('control-container');
+        if (ctrl) ctrl.style.display = 'block';
+
+        const btns = document.getElementById('button-container');
+        if (btns) btns.style.display = 'flex';
+
+        const restoreBtn = document.getElementById('restore-button');
+        if (restoreBtn) restoreBtn.style.display = 'none';
+
+        // 🛠 Recreate and append the minimize button if it was removed
+        if (!minimizeBtn || !frame.contains(minimizeBtn)) {
+            minimizeBtn = document.createElement('button');
+            minimizeBtn.textContent = 'X';
+            Object.assign(minimizeBtn.style, {
+                position: 'absolute',
+                top: '4px',
+                left: '4px',
+                width: '24px',
+                height: '24px',
+                fontWeight: 'bold',
+                fontSize: '16px',
+                lineHeight: '22px',
+                textAlign: 'center',
+                zIndex: 10002,
+                background: '#f0f0f0',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                padding: '0',
+                color: 'black'
+            });
+            minimizeBtn.onclick = minimizeCanvas;
+            frame.appendChild(minimizeBtn); // ✅ This was missing
+        }
     }
 
     function setupCanvas() {
@@ -348,7 +420,59 @@
         frame.appendChild(canvas);
         document.body.appendChild(frame);
         ctx = canvas.getContext('2d');
+        if (SHOW_MINIMIZE_RESTORE_BUTTONS) {
+            minimizeBtn = document.createElement('button');
+            minimizeBtn.textContent = 'X';
+            Object.assign(minimizeBtn.style, {
+                position: 'absolute',
+                top: '4px',
+                left: '4px',
+                width: '24px',
+                height: '24px',
+                fontWeight: 'bold',
+                fontSize: '16px',
+                lineHeight: '22px',
+                textAlign: 'center',
+                zIndex: 10002,
+                background: '#f0f0f0',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                padding: '0',
+                color: 'black'
+            });
+            minimizeBtn.onclick = minimizeCanvas;
+            frame.appendChild(minimizeBtn);
+        }
+        if (SHOW_MINIMIZE_RESTORE_BUTTONS) {
+            const restoreBtn = document.createElement('button');
+            restoreBtn.id = 'restore-button';
+            restoreBtn.textContent = 'Restore nonogram overlay';
+            Object.assign(restoreBtn.style, {
+                position: 'absolute',
+                top: '12px',
+                left: '12px',
+                zIndex: 10003,
+                padding: '6px 12px',
+                background: '#00cc44',
+                boxShadow: '0 0 8px #00cc44',
+                color: 'white',
+                fontWeight: 'bold',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'none'
+            });
+            restoreBtn.onclick = () => restoreCanvas();
 
+            const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+            if (video && video.parentElement) {
+                video.parentElement.style.position = 'relative';
+                video.parentElement.appendChild(restoreBtn);
+            } else {
+                document.body.appendChild(restoreBtn);
+            }
+        }
         canvas.addEventListener('mousedown', (e) => {
             e.preventDefault(); // prevent context menu
 
@@ -443,13 +567,13 @@
         });
 
         // ⚡ Separate from the above!
-canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-});}
-function createMainButtons() {
-    const container = document.createElement('div');
-    container.id = 'button-container';
-    container.style.cssText = `
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });}
+    function createMainButtons() {
+        const container = document.createElement('div');
+        container.id = 'button-container';
+        container.style.cssText = `
         position: absolute;
         bottom: 0;
         left: 0;
