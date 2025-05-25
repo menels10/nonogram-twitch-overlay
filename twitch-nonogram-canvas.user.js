@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas 
+// @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      3.7
+// @version      3.75
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -24,7 +24,9 @@
     let lastExported = new Set(), lastExportedWhite = new Set(), cellStates = [];
     let hoveredRow = -1;
     let hoveredCol = -1;
-
+    let isMarking = false;
+    let markValue = 0;       // 1 = black, 2 = white
+    let eraseMode = false;   // true if we're unmarking cells
 
     const sizeLookup = {
         "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
@@ -347,11 +349,40 @@
         document.body.appendChild(frame);
         ctx = canvas.getContext('2d');
 
-        frame.addEventListener('mousedown', (e) => {
-            // Allow dragging even when clicking on the canvas
-            isDragging = true;
-            dragOffsetX = e.clientX - frame.offsetLeft;
-            dragOffsetY = e.clientY - frame.offsetTop;
+        canvas.addEventListener('mousedown', (e) => {
+            e.preventDefault(); // prevent context menu
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            const layout = getLayoutSettings(size, colClueCount);
+            const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
+            const clueH = 30 * colClueCount + 5;
+            const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
+            const cellSize = layout ? (layout.cellSize * size + fineTune) / size : (gridSize + fineTune) / size;
+
+            const ox = canvas.width - cellSize * size - anchorX;
+            const oy = canvas.height - cellSize * size - anchorY;
+            const c = Math.floor((x - ox) / cellSize);
+            const r = Math.floor((y - oy) / cellSize);
+
+            if (r >= 0 && r < size && c >= 0 && c < size) {
+                isMarking = true;
+                markValue = (e.button === 0) ? 1 : 2; // left = black, right = white
+                eraseMode = (cellStates[r][c] === markValue); // ← if already marked, erase
+
+                cellStates[r][c] = eraseMode ? 0 : markValue;
+
+                createGrid();
+            } else {
+                // Clicked outside grid → drag frame
+                isDragging = true;
+                dragOffsetX = e.clientX - frame.offsetLeft;
+                dragOffsetY = e.clientY - frame.offsetTop;
+            }
         });
 
         document.addEventListener('mousemove', (e) => {
@@ -360,46 +391,12 @@
                 frame.style.top = `${e.clientY - dragOffsetY}px`;
             }
         });
-        document.addEventListener('mouseup', () => isDragging = false);
-
-        canvas.addEventListener('mousedown', (e) => {
-            e.preventDefault(); // prevent selecting text or opening context menu
-
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-            const layout = getLayoutSettings(size, colClueCount);
-            let cellSize, ox, oy;
-            if (layout) {
-                anchorX = layout.anchorX;
-                anchorY = layout.anchorY;
-                cellSize = (layout.cellSize * size + fineTune) / size;
-            } else {
-                const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
-                const clueH = 30 * colClueCount + 5;
-                const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
-                cellSize = (gridSize + fineTune) / size;
-            }
-            ox = canvas.width - cellSize * size - anchorX;
-            oy = canvas.height - cellSize * size - anchorY;
-            const c = Math.floor((x - ox) / cellSize);
-            const r = Math.floor((y - oy) / cellSize);
-
-
-            if (r >= 0 && r < size && c >= 0 && c < size) {
-                if (e.button === 0) {
-                    // Left click
-                    cellStates[r][c] = cellStates[r][c] === 1 ? 0 : 1;
-                } else if (e.button === 2) {
-                    // Right click
-                    cellStates[r][c] = cellStates[r][c] === 2 ? 0 : 2;
-                }
-                createGrid(); // ✅ Refresh grid after marking
-            }
-
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            isMarking = false;
         });
+
+
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
@@ -431,6 +428,17 @@
             } else {
                 hoveredRow = -1;
                 hoveredCol = -1;
+            }
+            if (isMarking) {
+                const c = Math.floor((x - ox) / cellSize);
+                const r = Math.floor((y - oy) / cellSize);
+                if (r >= 0 && r < size && c >= 0 && c < size) {
+                    const targetValue = eraseMode ? 0 : markValue;
+                    if (cellStates[r][c] !== targetValue) {
+                        cellStates[r][c] = targetValue;
+                        createGrid();
+                    }
+                }
             }
         });
 
