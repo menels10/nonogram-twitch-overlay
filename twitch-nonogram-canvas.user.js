@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      3.8
+// @version      3.85
 // @description  Nonogram canvas grid with export functions
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -30,6 +30,8 @@
     let isMinimized = false;
     let animationFrameId = null;
     let minimizeBtn;
+    let moveHistory = [];        // now holds an array of arrays
+    let currentAction = null;    // will track the current drag group
 
     const sizeLookup = {
         "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
@@ -450,7 +452,7 @@
             restoreBtn.textContent = 'Restore nonogram overlay';
             Object.assign(restoreBtn.style, {
                 position: 'absolute',
-                top: '12px',
+                bottom: '12px',
                 left: '12px',
                 zIndex: 10003,
                 padding: '6px 12px',
@@ -498,8 +500,18 @@
                 markValue = (e.button === 0) ? 1 : 2; // left = black, right = white
                 eraseMode = (cellStates[r][c] === markValue); // ← if already marked, erase
 
-                cellStates[r][c] = eraseMode ? 0 : markValue;
+                currentAction = [];
+                const prevValue = cellStates[r][c];
+                const newValue = eraseMode ? 0 : markValue;
 
+                cellStates[r][c] = newValue;
+
+                currentAction = [{
+                    row: r,
+                    col: c,
+                    previous: prevValue,
+                    newValue: newValue
+                }];
                 createGrid();
             } else {
                 // Clicked outside grid → drag frame
@@ -518,6 +530,11 @@
         document.addEventListener('mouseup', () => {
             isDragging = false;
             isMarking = false;
+
+            if (currentAction && currentAction.length > 0) {
+                moveHistory.push(currentAction);
+            }
+            currentAction = null;
         });
 
 
@@ -559,6 +576,12 @@
                 if (r >= 0 && r < size && c >= 0 && c < size) {
                     const targetValue = eraseMode ? 0 : markValue;
                     if (cellStates[r][c] !== targetValue) {
+                        currentAction.push({
+                            row: r,
+                            col: c,
+                            previous: cellStates[r][c],
+                            newValue: targetValue
+                        });
                         cellStates[r][c] = targetValue;
                         createGrid();
                     }
@@ -611,7 +634,20 @@
     container.appendChild(makeBtn('Export black', exportCells));
     container.appendChild(makeBtn('Export white', exportWhiteCells));
     container.appendChild(makeBtn('Clean All', exportClearCommand));
+container.appendChild(makeBtn('Undo', () => {
+    if (moveHistory.length === 0) return;
 
+    const lastAction = moveHistory.pop();
+    lastAction.forEach(({ row, col, previous }) => {
+        cellStates[row][col] = previous;
+    });
+
+    // Clear export history so the reverted cells can be re-exported
+    lastExported.clear();
+    lastExportedWhite.clear();
+
+    createGrid();
+}));
     // Grouped zoom buttons
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
