@@ -723,7 +723,7 @@
 
         // Left‐aligned buttons
         container.appendChild(makeBtn('Export !fill', exportCells));
-        container.appendChild(makeBtn('Export !clear', exportWhiteCells));
+        container.appendChild(makeBtn('Export !empty', exportWhiteCells));
         container.appendChild(makeBtn('Undo', () => {
             if (!moveHistory.length) return;
             const lastAction = moveHistory.pop();
