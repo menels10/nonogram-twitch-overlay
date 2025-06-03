@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas 
+// @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      3.90
-// @description  Nonogram overlay + status bars + persistent config (minimize/blue-fill/status)
+// @version      4.0
+// @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
 // @grant        none
@@ -16,14 +16,13 @@
     //
     // ─── PERSISTENT UI CONFIG ─────────────────────────────────────────────────────
     //
-    // Load (or initialize) a small object in localStorage to remember checkboxes:
     let uiConfig = JSON.parse(localStorage.getItem('nonogramUIConfig')) || {
         showMinimizeButtons: false,
-        useBlueFill: false,
-        statusEnabled: false
+        useBlueFill:         false,
+        statusEnabled:       false,
+        fineTuningEnabled:   false
     };
 
-    // Whenever we change uiConfig, call this to save back:
     function saveUIConfig() {
         localStorage.setItem('nonogramUIConfig', JSON.stringify(uiConfig));
     }
@@ -31,11 +30,12 @@
     //
     // ─── MUTABLE FLAGS (initial values from uiConfig) ─────────────────────────────
     //
-    let showMinimizeButtons = uiConfig.showMinimizeButtons;  // toggled via config panel
-    let useBlueFill         = uiConfig.useBlueFill;          // toggled via config panel
-    let statusEnabled       = uiConfig.statusEnabled;        // toggled via config panel
+    let showMinimizeButtons  = uiConfig.showMinimizeButtons;
+    let useBlueFill          = uiConfig.useBlueFill;
+    let statusEnabled        = uiConfig.statusEnabled;
+    let fineTuningEnabled    = uiConfig.fineTuningEnabled;
 
-    const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.3, fineTune: 0 };
+    const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 };
     let size = 4, rowClueCount = 1, colClueCount = 1, ratio = 1.0;
     let anchorX = DEFAULT_CONF.anchorX, anchorY = DEFAULT_CONF.anchorY;
     let zoomFactor = DEFAULT_CONF.zoomFactor, fineTune = DEFAULT_CONF.fineTune;
@@ -53,21 +53,21 @@
 
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
     const statusRegions = [
-        { sx: 200, sy: 970, sw: 250, sh: 80 },  // Satiety
-        { sx: 500, sy: 970, sw: 250, sh: 80 },  // Energy
-        { sx: 800, sy: 970, sw: 250, sh: 80 }   // Engagement
+        { sx: 200, sy: 970, sw: 250, sh: 80 },
+        { sx: 500, sy: 970, sw: 250, sh: 80 },
+        { sx: 800, sy: 970, sw: 250, sh: 80 }
     ];
-    let statusCanvases = [];   // holds { canvas, ctx, region }
+    let statusCanvases = [];
 
     const sizeLookup = {
         "4_1": { cellSize: 90.47, anchorX: 11, anchorY: 11 },
-        "4_2": { cellSize: 85.2, anchorX: 11, anchorY: 11 },
+        "4_2": { cellSize: 85.2,  anchorX: 11, anchorY: 11 },
         "5_1": { cellSize: 72.19, anchorX: 11, anchorY: 11 },
         "5_2": { cellSize: 68.35, anchorX: 11, anchorY: 11 },
         "5_3": { cellSize: 64.35, anchorX: 11, anchorY: 11 },
         "6_1": { cellSize: 60.32, anchorX: 11, anchorY: 11 },
         "6_2": { cellSize: 57.12, anchorX: 11, anchorY: 11 },
-        "6_3": { cellSize: 54.0, anchorX: 11, anchorY: 11 },
+        "6_3": { cellSize: 54.0,  anchorX: 11, anchorY: 11 },
         "7_1": { cellSize: 51.57, anchorX: 11, anchorY: 11 },
         "7_2": { cellSize: 48.96, anchorX: 11, anchorY: 11 },
         "7_3": { cellSize: 46.29, anchorX: 11, anchorY: 11 },
@@ -89,15 +89,15 @@
         "11_1": { cellSize: 33.16, anchorX: 10, anchorY: 10 },
         "11_2": { cellSize: 31.54, anchorX: 10, anchorY: 10 },
         "11_3": { cellSize: 30.14, anchorX: 10, anchorY: 10 },
-        "11_4": { cellSize: 28.7, anchorX: 10, anchorY: 10 },
+        "11_4": { cellSize: 28.7,  anchorX: 10, anchorY: 10 },
         "11_5": { cellSize: 27.12, anchorX: 10, anchorY: 10 },
         "11_6": { cellSize: 25.53, anchorX: 10, anchorY: 10 },
-        "12_1": { cellSize: 30.4, anchorX: 10, anchorY: 10 },
+        "12_1": { cellSize: 30.4,  anchorX: 10, anchorY: 10 },
         "12_2": { cellSize: 29.07, anchorX: 10, anchorY: 10 },
         "12_3": { cellSize: 27.63, anchorX: 10, anchorY: 10 },
         "12_4": { cellSize: 26.24, anchorX: 10, anchorY: 10 },
         "12_5": { cellSize: 24.86, anchorX: 10, anchorY: 10 },
-        "12_6": { cellSize: 23.5, anchorX: 10, anchorY: 10 },
+        "12_6": { cellSize: 23.5,  anchorX: 10, anchorY: 10 },
         "13_1": { cellSize: 28.06, anchorX: 10, anchorY: 10 },
         "13_2": { cellSize: 26.96, anchorX: 10, anchorY: 10 },
         "13_3": { cellSize: 25.67, anchorX: 10, anchorY: 10 },
@@ -134,7 +134,7 @@
         "17_4": { cellSize: 19.02, anchorX: 10, anchorY: 10 },
         "17_5": { cellSize: 18.15, anchorX: 10, anchorY: 10 },
         "17_6": { cellSize: 17.28, anchorX: 10, anchorY: 10 },
-        "17_7": { cellSize: 16.4, anchorX: 10, anchorY: 10 },
+        "17_7": { cellSize: 16.4,  anchorX: 10, anchorY: 10 },
         "17_8": { cellSize: 15.54, anchorX: 10, anchorY: 10 },
         "17_9": { cellSize: 14.76, anchorX: 10, anchorY: 10 },
         "18_1": { cellSize: 20.42, anchorX: 10, anchorY: 10 },
@@ -150,8 +150,8 @@
         "19_2": { cellSize: 18.68, anchorX: 10, anchorY: 10 },
         "19_3": { cellSize: 18.02, anchorX: 10, anchorY: 10 },
         "19_4": { cellSize: 17.29, anchorX: 10, anchorY: 10 },
-        "19_5": { cellSize: 16.6, anchorX: 10, anchorY: 10 },
-        "19_6": { cellSize: 15.9, anchorX: 10, anchorY: 10 },
+        "19_5": { cellSize: 16.6,  anchorX: 10, anchorY: 10 },
+        "19_6": { cellSize: 15.9,  anchorX: 10, anchorY: 10 },
         "19_7": { cellSize: 15.21, anchorX: 10, anchorY: 10 },
         "19_8": { cellSize: 14.46, anchorX: 10, anchorY: 10 },
         "19_9": { cellSize: 13.74, anchorX: 10, anchorY: 10 },
@@ -161,7 +161,7 @@
         "20_3": { cellSize: 17.12, anchorX: 10, anchorY: 10 },
         "20_4": { cellSize: 16.43, anchorX: 10, anchorY: 10 },
         "20_5": { cellSize: 15.77, anchorX: 10, anchorY: 10 },
-        "20_6": { cellSize: 15.1, anchorX: 10, anchorY: 10 },
+        "20_6": { cellSize: 15.1,  anchorX: 10, anchorY: 10 },
         "20_7": { cellSize: 14.45, anchorX: 10, anchorY: 10 },
         "20_8": { cellSize: 13.74, anchorX: 10, anchorY: 10 },
         "20_9": { cellSize: 13.12, anchorX: 10, anchorY: 10 },
@@ -229,6 +229,23 @@
         });
         if (coords.length) navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
     }
+
+    // ─── “Export All Black” (ignores lastExported, grabs every filled cell) ─────
+    function exportAllCells() {
+        const coords = [];
+        cellStates.forEach((row, r) => {
+            row.forEach((s, c) => {
+                if (s === 1) {
+                    const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+                    coords.push(coord);
+                }
+            });
+        });
+        if (coords.length) {
+            navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
+        }
+    }
+
     function exportWhiteCells() {
         const coords = [];
         cellStates.forEach((row, r) => {
@@ -399,7 +416,6 @@
         if (!document.hidden) {
             renderHandle = requestAnimationFrame(render);
         } else {
-            // fallback to keep updating even if the tab is “hidden”
             renderHandle = setTimeout(render, 1000 / 30);
         }
     }
@@ -677,12 +693,12 @@
             left: 0;
             right: 0;
             display: flex;
-            justify-content: center;
             align-items: center;
-            gap: 8px;
-            padding: 6px 0;
+            padding: 6px 8px;
             z-index: 10001;
             pointer-events: auto;
+            background: rgba(0,0,0,0.5);
+            border-top: 1px solid #333;
         `;
         frame.appendChild(container);
 
@@ -705,47 +721,45 @@
             return btn;
         };
 
-        container.appendChild(makeBtn('Export black', exportCells));
-        container.appendChild(makeBtn('Export white', exportWhiteCells));
-        container.appendChild(makeBtn('Clean All', cleanAll));
+        // Left‐aligned buttons
+        container.appendChild(makeBtn('Export !fill', exportCells));
+        container.appendChild(makeBtn('Export !clear', exportWhiteCells));
         container.appendChild(makeBtn('Undo', () => {
             if (!moveHistory.length) return;
             const lastAction = moveHistory.pop();
-            lastAction.forEach(({ row, col, previous }) => {
+            lastAction.forEach(({ row, col, previous, newValue }) => {
+                // Compute the coordinate string
+                const coord = `${String.fromCharCode(97 + col)}${row + 1}`;
+
+                // If the undone action had painted a black cell (newValue === 1), remove it from lastExported
+                if (newValue === 1) {
+                    lastExported.delete(coord);
+                }
+
+                // If the undone action had painted a white cell (newValue === 2), remove it from lastExportedWhite
+                if (newValue === 2) {
+                    lastExportedWhite.delete(coord);
+                }
+
+                // Revert the cell state
                 cellStates[row][col] = previous;
             });
-            lastExported.clear();
-            lastExportedWhite.clear();
+
             createGrid();
         }));
 
-        const zoomGroup = document.createElement('div');
-        zoomGroup.style.cssText = `
-            display: flex;
-            gap: 4px;
-            border: 1px solid #000;
-            border-radius: 3px;
-            padding: 2px 4px;
-            background: transparent;
-        `;
-        zoomGroup.appendChild(makeBtn('−', () => {
-            zoomFactor = Math.max(0.1, zoomFactor * 0.9);
-            updateCanvasSize();
-        }));
-        zoomGroup.appendChild(makeBtn('1× zoom', () => {
-            zoomFactor = 1.0;
-            updateCanvasSize();
-        }));
-        zoomGroup.appendChild(makeBtn('+', () => {
-            zoomFactor = zoomFactor * 1.1;
-            updateCanvasSize();
-        }));
-        container.appendChild(zoomGroup);
 
-        const cfgBtn = makeBtn('⚙️ Config', () => {
+        // Spacer pushes the next buttons to the right
+        const spacer = document.createElement('div');
+        spacer.style.flex = '1';
+        container.appendChild(spacer);
+
+        // Right‐aligned buttons
+        container.appendChild(makeBtn('reset export', exportAllCells));
+        container.appendChild(makeBtn('Clean grid', cleanAll));
+        container.appendChild(makeBtn('⚙️ Config', () => {
             toggleExtraConfigPanel();
-        });
-        container.appendChild(cfgBtn);
+        }));
     }
 
     let labelMap = {};
@@ -795,6 +809,9 @@
         controlSections.forEach((s, i) => {
             const sec = document.createElement('div');
             sec.id = `section-${s.key}`;
+            if (s.key === 'fine' && !fineTuningEnabled) {
+                sec.style.display = 'none';
+            }
 
             const lbl = document.createElement('div');
             lbl.textContent = `${s.label}: ${s.get()}`;
@@ -866,6 +883,54 @@
             controlContainer.appendChild(sec);
             if (i < controlSections.length - 1) controlContainer.appendChild(document.createElement('hr'));
         });
+
+        // ─── MAGNIFICATION SECTION ────────────────────────────────────────────────
+        const magSec = document.createElement('div');
+        magSec.id = 'section-zoom';
+
+        const magLbl = document.createElement('div');
+        magLbl.textContent = 'Magnification';
+        magLbl.style.fontWeight = 'bold';
+        magLbl.style.marginBottom = '4px';
+        magSec.appendChild(magLbl);
+
+        const magRow = document.createElement('div');
+        Object.assign(magRow.style, {
+            display: 'flex',
+            gap: '4px',
+            marginBottom: '8px',
+            alignItems: 'center'
+        });
+
+        const makeZoomBtn = (label, onClick) => {
+            const btn = document.createElement('button');
+            btn.textContent = label;
+            Object.assign(btn.style, {
+                width: '28px',
+                height: '28px',
+                border: '1px solid #007bff',
+                borderRadius: '4px',
+                fontSize: '16px',
+                cursor: 'pointer',
+                backgroundColor: '#007bff',
+                color: 'white',
+                textAlign: 'center'
+            });
+            btn.addEventListener('click', onClick);
+            return btn;
+        };
+
+        magRow.appendChild(makeZoomBtn('−', () => {
+            zoomFactor = Math.max(0.1, zoomFactor * 0.9);
+            updateCanvasSize();
+        }));
+        magRow.appendChild(makeZoomBtn('+', () => {
+            zoomFactor = zoomFactor * 1.1;
+            updateCanvasSize();
+        }));
+
+        magSec.appendChild(magRow);
+        controlContainer.appendChild(magSec);
     }
 
     function updateAllLabels() {
@@ -990,9 +1055,33 @@
         statusDivToggle.appendChild(statusChk);
         statusDivToggle.appendChild(statusLabel);
 
+        // 4) Fine-tuning toggle
+        const fineDiv = document.createElement('div');
+        fineDiv.style.marginTop = '8px';
+        const fineChk = document.createElement('input');
+        fineChk.type = 'checkbox';
+        fineChk.id = 'chk-fine';
+        fineChk.checked = fineTuningEnabled;
+        fineChk.style.marginRight = '6px';
+        fineChk.addEventListener('change', () => {
+            fineTuningEnabled = fineChk.checked;
+            uiConfig.fineTuningEnabled = fineTuningEnabled;
+            saveUIConfig();
+            const fineSection = document.getElementById('section-fine');
+            if (fineSection) {
+                fineSection.style.display = fineTuningEnabled ? 'block' : 'none';
+            }
+        });
+        const fineLabel = document.createElement('label');
+        fineLabel.htmlFor = 'chk-fine';
+        fineLabel.textContent = 'Enable fine-tune controls';
+        fineDiv.appendChild(fineChk);
+        fineDiv.appendChild(fineLabel);
+
         panel.appendChild(minDiv);
         panel.appendChild(blueDiv);
         panel.appendChild(statusDivToggle);
+        panel.appendChild(fineDiv);
 
         frame.appendChild(panel);
     }
@@ -1066,9 +1155,7 @@
             text-align: center;
         `;
 
-        // Subtract 20px from the control panel's width
-        const cw = controlContainer.clientWidth - 20;  // e.g. 160 - 20 = 140
-        // Maintain aspect ratio of 250×80 → height = cw * (80/250)
+        const cw = controlContainer.clientWidth - 20;
         const ch = Math.round((cw * 80) / 250);
 
         statusRegions.forEach((region, idx) => {
@@ -1091,8 +1178,6 @@
         });
 
         controlContainer.appendChild(scCont);
-
-        // Immediately show/hide based on persisted setting:
         scCont.style.display = statusEnabled ? 'block' : 'none';
     }
 
@@ -1111,7 +1196,5 @@
         createExtraConfigPanel();
         render();
     });
-
-    // ────────────────────────────────────────────────────────────────────────────
 
 })();
