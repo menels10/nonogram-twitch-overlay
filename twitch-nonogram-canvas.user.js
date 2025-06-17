@@ -79,7 +79,7 @@
         "9_1": { cellSize: 40, anchorX: 2.75, anchorY: 1 },
         "9_2": { cellSize: 38.7, anchorX: 2.75, anchorY: 1 },
         "9_3": { cellSize: 35.9, anchorX: 3.25, anchorY: 1 },
-        "9_4": { cellSize: 34.74, anchorX: 2.75, anchorY: 1 },
+        "9_4": { cellSize: 33.3, anchorX: 2.75, anchorY: 1 },
         "9_5": { cellSize: 31.9, anchorX: 2.75, anchorY: 1 },
         "10_1": { cellSize: 36, anchorX: 2.75, anchorY: 1 },
         "10_2": { cellSize: 34.6, anchorX: 3.5, anchorY: 0.5 },
