@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas
+// @name         Twitch Nonogram Grid with canvas test
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.10
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -20,9 +20,12 @@
         showMinimizeButtons: false,
         useBlueFill:         false,
         statusEnabled:       false,
-        fineTuningEnabled:   false
+        fineTuningEnabled:   false,
+        sharpeningEnabled:   false
     };
-
+    if (typeof uiConfig.sharpeningEnabled !== 'boolean') {
+        uiConfig.sharpeningEnabled = false;
+    }
     function saveUIConfig() {
         localStorage.setItem('nonogramUIConfig', JSON.stringify(uiConfig));
     }
@@ -34,6 +37,7 @@
     let useBlueFill          = uiConfig.useBlueFill;
     let statusEnabled        = uiConfig.statusEnabled;
     let fineTuningEnabled    = uiConfig.fineTuningEnabled;
+    let sharpeningEnabled = uiConfig.sharpeningEnabled;
 
     const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 };
     let size = 4, rowClueCount = 1, colClueCount = 1, ratio = 1.0;
@@ -53,9 +57,9 @@
 
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
     const statusRegions = [
-        { sx: 200, sy: 970, sw: 250, sh: 80 },
-        { sx: 500, sy: 970, sw: 250, sh: 80 },
-        { sx: 800, sy: 970, sw: 250, sh: 80 }
+        { sx: 200, sy: 980, sw: 250, sh: 70 },
+        { sx: 500, sy: 980, sw: 250, sh: 70 },
+        { sx: 800, sy: 980, sw: 250, sh: 70 }
     ];
     let statusCanvases = [];
 
@@ -344,7 +348,6 @@
             }
         }
     }
-
     function sharpen(ctx, w, h, mix) {
         var x, sx, sy, r, g, b, a, dstOff, srcOff, wt, cx, cy, scy, scx,
             weights = [0, -1, 0, -1, 5, -1, 0, -1, 0],
@@ -361,10 +364,7 @@
                 sy = y;
                 sx = x;
                 dstOff = (y * w + x) * 4;
-                r = 0;
-                g = 0;
-                b = 0;
-                a = 0;
+                r = g = b = a = 0;
 
                 for (cy = 0; cy < katet; cy++) {
                     for (cx = 0; cx < katet; cx++) {
@@ -374,8 +374,7 @@
                         if (scy >= 0 && scy < h && scx >= 0 && scx < w) {
                             srcOff = (scy * w + scx) * 4;
                             wt = weights[cy * katet + cx];
-
-                            r += srcBuff[srcOff] * wt;
+                            r += srcBuff[srcOff]     * wt;
                             g += srcBuff[srcOff + 1] * wt;
                             b += srcBuff[srcOff + 2] * wt;
                             a += srcBuff[srcOff + 3] * wt;
@@ -383,16 +382,15 @@
                     }
                 }
 
-                dstBuff[dstOff] = r * mix + srcBuff[dstOff] * (1 - mix);
+                dstBuff[dstOff]     = r * mix + srcBuff[dstOff]     * (1 - mix);
                 dstBuff[dstOff + 1] = g * mix + srcBuff[dstOff + 1] * (1 - mix);
                 dstBuff[dstOff + 2] = b * mix + srcBuff[dstOff + 2] * (1 - mix);
-                dstBuff[dstOff + 3] = srcBuff[dstOff + 3];
+                dstBuff[dstOff + 3] = srcBuff[dstOff + 3]; // keep alpha
             }
         }
 
         ctx.putImageData(dstData, 0, 0);
     }
-
     function drawROI() {
         const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
         if (!video) return;
@@ -409,7 +407,10 @@
             roiX, roiY, roiWidth, roiHeight,
             0, 0, canvas.width, canvas.height
         );
-	sharpen(ctx, canvas.width, canvas.height, 0.9);
+
+        if (sharpeningEnabled) {
+            sharpen(ctx, canvas.width, canvas.height, 0.9);
+        }
     }
 
     function updateCanvasSize() {
@@ -1121,6 +1122,25 @@
                 fineSection.style.display = fineTuningEnabled ? 'block' : 'none';
             }
         });
+        // 5) Sharpen toggle
+        const sharpenDiv = document.createElement('div');
+        sharpenDiv.style.marginTop = '8px';
+        const sharpenChk = document.createElement('input');
+        sharpenChk.type = 'checkbox';
+        sharpenChk.id = 'chk-sharpen';
+        sharpenChk.checked = sharpeningEnabled;
+        sharpenChk.style.marginRight = '6px';
+        sharpenChk.addEventListener('change', () => {
+            sharpeningEnabled = sharpenChk.checked;
+            uiConfig.sharpeningEnabled = sharpeningEnabled;
+            saveUIConfig();
+        });
+        const sharpenLabel = document.createElement('label');
+        sharpenLabel.htmlFor = 'chk-sharpen';
+        sharpenLabel.textContent = 'Enable sharpen filter';
+        sharpenDiv.appendChild(sharpenChk);
+        sharpenDiv.appendChild(sharpenLabel);
+
         const fineLabel = document.createElement('label');
         fineLabel.htmlFor = 'chk-fine';
         fineLabel.textContent = 'Enable fine-tune controls';
@@ -1131,7 +1151,7 @@
         panel.appendChild(blueDiv);
         panel.appendChild(statusDivToggle);
         panel.appendChild(fineDiv);
-
+        panel.appendChild(sharpenDiv);
         frame.appendChild(panel);
     }
 
