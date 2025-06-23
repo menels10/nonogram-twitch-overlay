@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas test
 // @namespace    http://tampermonkey.net/
-// @version      4.10
+// @version      4.11
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -463,11 +463,7 @@
         createGrid();
         if (statusEnabled) drawStatus();
 
-        if (!document.hidden) {
-            renderHandle = requestAnimationFrame(render);
-        } else {
-            renderHandle = setTimeout(render, 1000 / 30);
-        }
+        renderHandle = setTimeout(render, 1000); // Limit to 4 FPS
     }
 
     function minimizeCanvas() {
