@@ -463,7 +463,11 @@
         createGrid();
         if (statusEnabled) drawStatus();
 
-        renderHandle = setTimeout(render, 1000); // Limit to 4 FPS
+        if (!document.hidden) {
+            renderHandle = requestAnimationFrame(render);
+        } else {
+            renderHandle = setTimeout(render, 1000 / 30);
+        }
     }
 
     function minimizeCanvas() {
