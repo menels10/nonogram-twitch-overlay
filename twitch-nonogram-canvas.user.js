@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Twitch Nonogram Grid with canvas test
+// @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.11
+// @version      4.12
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -38,7 +38,8 @@
     let statusEnabled        = uiConfig.statusEnabled;
     let fineTuningEnabled    = uiConfig.fineTuningEnabled;
     let sharpeningEnabled = uiConfig.sharpeningEnabled;
-
+    let roiCanvas = document.createElement('canvas');
+    let roiCtx = roiCanvas.getContext('2d');
     const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 };
     let size = 4, rowClueCount = 1, colClueCount = 1, ratio = 1.0;
     let anchorX = DEFAULT_CONF.anchorX, anchorY = DEFAULT_CONF.anchorY;
@@ -391,6 +392,29 @@
 
         ctx.putImageData(dstData, 0, 0);
     }
+    function updateROI() {
+        const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+        if (!video) return;
+
+        roiCtx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
+
+        const actualWidth = video.videoWidth;
+        const actualHeight = video.videoHeight;
+        const roiWidth = actualWidth * roiWidthPercent;
+        const roiHeight = actualHeight * roiHeightPercent;
+        const roiX = actualWidth - roiWidth;
+        const roiY = actualHeight - roiHeight;
+
+        roiCtx.drawImage(
+            video,
+            roiX, roiY, roiWidth, roiHeight,
+            0, 0, roiCanvas.width, roiCanvas.height
+        );
+
+        if (sharpeningEnabled) {
+            sharpen(roiCtx, roiCanvas.width, roiCanvas.height, 0.9);
+        }
+    }
     function drawROI() {
         const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
         if (!video) return;
@@ -419,14 +443,15 @@
 
         canvas.width = fixedWidth;
         canvas.height = fixedHeight;
-
+        roiCanvas.width = canvas.width;
+        roiCanvas.height = canvas.height;
         canvas.style.width = `${fixedWidth * zoomFactor}px`;
         canvas.style.height = `${fixedHeight * zoomFactor}px`;
         frame.style.width = `${fixedWidth * zoomFactor}px`;
         frame.style.height = `${fixedHeight * zoomFactor + 60}px`;
 
         createGrid();
-        drawROI();
+        updateROI();
     }
 
     // ─── DRAW STATUS CANVASES (scaled to actual video resolution) ─────────────────
@@ -456,19 +481,23 @@
     // ────────────────────────────────────────────────────────────────────────────
 
     function render() {
-        if (isMinimized) return;
-
+        // Skip if minimized or canvas is hidden
+        if (isMinimized || canvas.style.display === 'none') {
+            return;
+        }
+    
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawROI();
+        ctx.drawImage(roiCanvas, 0, 0);
         createGrid();
         if (statusEnabled) drawStatus();
-
+    
         if (!document.hidden) {
             renderHandle = requestAnimationFrame(render);
         } else {
             renderHandle = setTimeout(render, 1000 / 30);
         }
     }
+
 
     function minimizeCanvas() {
         isMinimized = true;
@@ -1264,6 +1293,7 @@
         createControlAndStatus();
         createExtraConfigPanel();
         render();
+        setInterval(updateROI, 1000); // update ROI once per second
     });
 
 })();
