@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.12
+// @version      4.13
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
