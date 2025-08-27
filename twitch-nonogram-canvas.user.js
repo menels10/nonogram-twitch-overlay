@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.15
+// @version      4.16
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt
 // @match        https://www.twitch.tv/goki*
@@ -236,18 +236,38 @@
     }
 
     // ─── “Export All Black” (ignores lastExported, grabs every filled cell) ─────
-    function exportAllCells() {
+    function exportAllCells(mode) {
+        // Always reset both trackers
+        lastExported.clear();
+        lastExportedWhite.clear();
+
+        // If no mode provided, behave as a pure reset (no export)
+        if (!mode) return;
+
         const coords = [];
-        cellStates.forEach((row, r) => {
-            row.forEach((s, c) => {
-                if (s === 1) {
-                    const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
-                    coords.push(coord);
-                }
+
+        if (mode === 'black') {
+            cellStates.forEach((row, r) => {
+                row.forEach((s, c) => {
+                    if (s === 1) {
+                        const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+                        coords.push(coord);
+                        lastExported.add(coord);
+                    }
+                });
             });
-        });
-        if (coords.length) {
-            navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
+            if (coords.length) navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
+        } else if (mode === 'white') {
+            cellStates.forEach((row, r) => {
+                row.forEach((s, c) => {
+                    if (s === 2) {
+                        const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+                        coords.push(coord);
+                        lastExportedWhite.add(coord);
+                    }
+                });
+            });
+            if (coords.length) navigator.clipboard.writeText(`!empty ${coords.join(' ')}`);
         }
     }
 
