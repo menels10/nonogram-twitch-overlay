@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.20
+// @version      4.21
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -64,7 +64,9 @@
     let progressTimer = null;      // setInterval handle for UI progress
     let exportFillBtn = null;      // set in createMainButtons()
     let exportEmptyBtn = null;     // set in createMainButtons()
-
+// Clue dashes (left/top bands)
+let rowDashes = [];   // array per row -> [canvasX,...]
+let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
     const statusRegions = [
         { sx: 200, sy: 980, sw: 250, sh: 70 },
@@ -219,8 +221,67 @@
         cellStates = Array.from({ length: size }, () => Array(size).fill(0));
         lastExported = new Set();
         lastExportedWhite = new Set();
+        resetClueDashes();
     }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
+// --- Column dashes (top clue area), pos is vertical offset within [0..clueH]
+function addColDash(col, pos, clueH) {
+  if (col < 0 || col >= size) return;
+  if (!Array.isArray(colDashes[col])) colDashes[col] = [];
+  colDashes[col].push(clamp(pos, 0, clueH));
+}
+function removeNearestColDash(col, pos, threshold = 10) {
+  const arr = colDashes[col]; if (!arr || !arr.length) return;
+  let best = -1, bestDist = Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const d = Math.abs(arr[i] - pos);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+}
+
+// --- Row dashes (left clue area), store absolute canvas X for precise draw
+function addRowDash(row, canvasX) {
+  if (row < 0 || row >= size) return;
+  if (!Array.isArray(rowDashes[row])) rowDashes[row] = [];
+  rowDashes[row].push(canvasX);
+}
+function removeNearestRowDash(row, canvasX, threshold = 10) {
+  const arr = rowDashes[row]; if (!arr || !arr.length) return;
+  let best = -1, bestDist = Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const d = Math.abs(arr[i] - canvasX);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+}
+function computeGridGeometry() {
+  // clue area sizing (you already use same logic in createGrid)
+  ctx.font = `bold 30px Arial`;
+  const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
+  const clueH = 30 * colClueCount + 5;
+
+  const layout = getLayoutSettings(size, colClueCount);
+  let cellSize;
+  if (layout) {
+    const defaultCellSize = layout.cellSize;
+    cellSize = (defaultCellSize * size + fineTune) / size;
+  } else {
+    const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
+    cellSize = (gridSize + fineTune) / size;
+  }
+
+  const ox = canvas.width - cellSize * size - anchorX; // left edge of grid
+  const oy = canvas.height - cellSize * size - anchorY; // top edge of grid
+
+  return { clueW, clueH, cellSize, ox, oy };
+}
+// Reset dash arrays whenever grid changes size
+function resetClueDashes() {
+  rowDashes = Array.from({ length: size }, () => []);
+  colDashes = Array.from({ length: size }, () => []);
+}
     // ─── “Clean All” (wipes grid + copies clear command) ─────────────────────────
     function cleanAll() {
         initCells();
@@ -466,66 +527,87 @@ function setBtnProgress(btn, p) {
         // Placeholder
     }
 
-    function createGrid() {
-        const cw = canvas.width, ch = canvas.height;
-        ctx.font = `bold 30px Arial`;
-        const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
-        const clueH = 30 * colClueCount + 5;
-        const layout = getLayoutSettings(size, colClueCount);
-        let cellSize, ox, oy;
+function createGrid() {
+  const { clueW, clueH, cellSize, ox, oy } = computeGridGeometry();
 
-        if (layout) {
-            anchorX = layout.anchorX;
-            anchorY = layout.anchorY;
-            cellSize = (layout.cellSize * size + fineTune) / size;
-        } else {
-            console.warn(`Missing layout for size=${size}, colClueCount=${colClueCount}. Falling back.`);
-            const gridSize = Math.min(cw - clueW, ch - clueH);
-            cellSize = (gridSize + fineTune) / size;
-        }
+  ctx.strokeStyle = 'cyan';
+  ctx.lineWidth = 1;
 
-        ox = cw - cellSize * size - anchorX;
-        oy = ch - cellSize * size - anchorY;
+  // ── Extended hover (row over left clues; column over top clues) ───────────
+  if ((hoveredRow >= 0 && hoveredRow < size) || (hoveredCol >= 0 && hoveredCol < size)) {
+    ctx.fillStyle = 'rgba(100, 150, 255, 0.25)';
 
-        ctx.strokeStyle = 'cyan';
-        ctx.lineWidth = 1;
-
-        // Highlight hovered row/col
-        if (hoveredRow >= 0 && hoveredCol >= 0) {
-            ctx.fillStyle = 'rgba(100, 150, 255, 0.25)';
-            for (let c = 0; c < size; c++) {
-                const x = ox + c * cellSize;
-                const y = oy + hoveredRow * cellSize;
-                ctx.fillRect(x, y, cellSize, cellSize);
-            }
-            for (let r = 0; r < size; r++) {
-                const x = ox + hoveredCol * cellSize;
-                const y = oy + r * cellSize;
-                ctx.fillRect(x, y, cellSize, cellSize);
-            }
-        }
-
-        for (let r = 0; r < size; r++) {
-            for (let c = 0; c < size; c++) {
-                if (cellStates[r][c] === 1) {
-                    ctx.fillStyle = useBlueFill
-                        ? 'rgba(50, 50, 255, 0.7)'
-                        : 'rgba(0, 0, 0, 0.7)';
-                } else if (cellStates[r][c] === 2) {
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-                }
-                const x = ox + c * cellSize;
-                const y = oy + r * cellSize;
-                ctx.strokeRect(x, y, cellSize, cellSize);
-                if (cellStates[r][c] === 1 || cellStates[r][c] === 2) {
-                    ctx.fillRect(x, y, cellSize, cellSize);
-                    if (cellStates[r][c] === 2) {
-                        ctx.fillStyle = 'black';
-                    }
-                }
-            }
-        }
+    if (hoveredRow >= 0) {
+      const y = oy + hoveredRow * cellSize;
+      // highlight entire row in grid
+      ctx.fillRect(ox, y, cellSize * size, cellSize);
+      // extend to left clue area
+      if (ox > 0) ctx.fillRect(0, y, ox, cellSize);
     }
+
+    if (hoveredCol >= 0) {
+      const x = ox + hoveredCol * cellSize;
+      // highlight entire column in grid
+      ctx.fillRect(x, oy, cellSize, cellSize * size);
+      // extend through top clue band
+      ctx.fillRect(x, oy - clueH, cellSize, clueH);
+    }
+  }
+
+  // ── Draw free-placed clue dashes ──────────────────────────────────────────
+  const dashH = 3;
+
+  // Top (column dashes). Each dash is centered at column center; vertical pos in [0..clueH]
+  {
+    const dashW = (1 * cellSize) / 3;
+    ctx.fillStyle = '#ffeb3b';
+    for (let c = 0; c < size; c++) {
+      const colX = ox + c * cellSize + cellSize / 2;
+      const baseY = oy - clueH; // top of top-clue area
+      const list = colDashes[c] || [];
+      for (const pos of list) {
+        const y = clamp(baseY + pos - dashH / 2, baseY, oy - dashH);
+        ctx.fillRect(colX - dashW / 2, y, dashW, dashH);
+      }
+    }
+  }
+
+  // Left (row dashes). Each dash is centered vertically in the row; X is absolute canvas X
+  {
+    const dashW = cellSize / 4;
+    ctx.fillStyle = '#ffeb3b';
+    for (let r = 0; r < size; r++) {
+      const rowTop = oy + r * cellSize;
+      const list = rowDashes[r] || [];
+      for (const canvasX of list) {
+        const xDraw = Math.max(0, Math.min(canvasX, ox)); // keep inside left area
+        const yDash = rowTop + (cellSize - dashH) / 2;
+        ctx.fillRect(xDraw - dashW / 2, yDash, dashW, dashH);
+      }
+    }
+  }
+
+  // ── Grid cells ────────────────────────────────────────────────────────────
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const x = ox + c * cellSize;
+      const y = oy + r * cellSize;
+
+      if (cellStates[r][c] === 1) {
+        ctx.fillStyle = useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+      } else if (cellStates[r][c] === 2) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      }
+
+      ctx.strokeRect(x, y, cellSize, cellSize);
+      if (cellStates[r][c] === 1 || cellStates[r][c] === 2) {
+        ctx.fillRect(x, y, cellSize, cellSize);
+        if (cellStates[r][c] === 2) ctx.fillStyle = 'black';
+      }
+    }
+  }
+}
+
     function sharpen(ctx, w, h, mix) {
         var x, sx, sy, r, g, b, a, dstOff, srcOff, wt, cx, cy, scy, scx,
             weights = [0, -1, 0, -1, 5, -1, 0, -1, 0],
@@ -760,7 +842,120 @@ function setBtnProgress(btn, p) {
             frame.appendChild(minimizeBtn);
         }
     }
+function onCanvasMouseDown(e) {
+  e.preventDefault();
 
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+
+  const { clueW, clueH, cellSize, ox, oy } = computeGridGeometry();
+  const yOverGrid = (y >= oy && y < oy + size * cellSize);
+
+  // --- Top clue band (column dashes) ---
+  const inTopClues = (x >= ox && x < ox + size * cellSize && y >= oy - clueH && y < oy);
+  if (inTopClues) {
+    const col = Math.floor((x - ox) / cellSize);
+    if (col >= 0 && col < size) {
+      const pos = y - (oy - clueH); // vertical offset inside [0..clueH]
+      if (e.button === 2) addColDash(col, pos, clueH);     // Right click: add
+      else if (e.button === 0) removeNearestColDash(col, pos, 10); // Left: remove
+      createGrid();
+      return;
+    }
+  }
+
+  // --- Left clue band (row dashes) ---
+  const inLeftClues = (x < ox && yOverGrid);
+  if (inLeftClues) {
+    const row = Math.floor((y - oy) / cellSize);
+    if (row >= 0 && row < size) {
+      if (e.button === 2) addRowDash(row, x);            // Right click: add at canvas X
+      else if (e.button === 0) removeNearestRowDash(row, x, 10); // Left: remove nearest
+      createGrid();
+      return;
+    }
+  }
+
+  // --- Otherwise: grid draw/drag like before ---
+  const c = Math.floor((x - ox) / cellSize);
+  const r = Math.floor((y - oy) / cellSize);
+
+  if (r >= 0 && r < size && c >= 0 && c < size) {
+    isMarking = true;
+    markValue = (e.button === 0) ? 1 : 2;
+    eraseMode = (cellStates[r][c] === markValue);
+
+    currentAction = [];
+    const prevValue = cellStates[r][c];
+    const newValue = eraseMode ? 0 : markValue;
+
+    cellStates[r][c] = newValue;
+    currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
+    createGrid();
+  } else {
+    isDragging = true;
+    dragOffsetX = e.clientX - frame.offsetLeft;
+    dragOffsetY = e.clientY - frame.offsetTop;
+  }
+}
+    function onCanvasMouseMove(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+
+  const { clueW, clueH, cellSize, ox, oy } = computeGridGeometry();
+
+  // Determine indices if inside grid
+  const c = Math.floor((x - ox) / cellSize);
+  const r = Math.floor((y - oy) / cellSize);
+
+  // Extended hover defaults
+  let newRow = -1, newCol = -1;
+
+  // Row highlight over full vertical grid span, regardless of X (so it works over left clues)
+  const yOverGrid = (y >= oy && y < oy + size * cellSize);
+  if (yOverGrid) {
+    const ry = Math.floor((y - oy) / cellSize);
+    if (ry >= 0 && ry < size) newRow = ry;
+  }
+
+  // Column highlight in top clue band
+  const inTopClues = (x >= ox && x < ox + size * cellSize && y >= oy - clueH && y < oy);
+  if (inTopClues) {
+    const col = Math.floor((x - ox) / cellSize);
+    if (col >= 0 && col < size) newCol = col;
+  }
+
+  // Inside grid gives both
+  if (r >= 0 && r < size && c >= 0 && c < size) {
+    newRow = r;
+    newCol = c;
+  }
+
+  hoveredRow = newRow;
+  hoveredCol = newCol;
+
+  // Drag-paint inside grid
+  if (isMarking && newRow >= 0 && newCol >= 0) {
+    const targetValue = eraseMode ? 0 : markValue;
+    if (cellStates[newRow][newCol] !== targetValue) {
+      if (!currentAction) currentAction = [];
+      currentAction.push({
+        row: newRow, col: newCol,
+        previous: cellStates[newRow][newCol],
+        newValue: targetValue
+      });
+      cellStates[newRow][newCol] = targetValue;
+    }
+  }
+
+  createGrid();
+}
     function setupCanvas() {
         frame = document.createElement('div');
         frame.id = 'draggable-frame';
@@ -829,44 +1024,7 @@ function setBtnProgress(btn, p) {
             frame.appendChild(minimizeBtn);
         }
 
-        canvas.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-
-            const layout = getLayoutSettings(size, colClueCount);
-            const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
-            const clueH = 30 * colClueCount + 5;
-            const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
-            const cellSize = layout ? (layout.cellSize * size + fineTune) / size : (gridSize + fineTune) / size;
-
-            const ox = canvas.width - cellSize * size - anchorX;
-            const oy = canvas.height - cellSize * size - anchorY;
-            const c = Math.floor((x - ox) / cellSize);
-            const r = Math.floor((y - oy) / cellSize);
-
-            if (r >= 0 && r < size && c >= 0 && c < size) {
-                isMarking = true;
-                markValue = (e.button === 0) ? 1 : 2;
-                eraseMode = (cellStates[r][c] === markValue);
-
-                currentAction = [];
-                const prevValue = cellStates[r][c];
-                const newValue = eraseMode ? 0 : markValue;
-
-                cellStates[r][c] = newValue;
-                currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
-                createGrid();
-            } else {
-                isDragging = true;
-                dragOffsetX = e.clientX - frame.offsetLeft;
-                dragOffsetY = e.clientY - frame.offsetTop;
-            }
-        });
+canvas.addEventListener('mousedown', onCanvasMouseDown);
 
         document.addEventListener('mousemove', (e) => {
             if (isDragging) {
@@ -884,56 +1042,7 @@ function setBtnProgress(btn, p) {
             currentAction = null;
         });
 
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const scaleX = canvas.width / rect.width;
-            const scaleY = canvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-
-            const layout = getLayoutSettings(size, colClueCount);
-            let cellSize, ox, oy;
-            if (layout) {
-                anchorX = layout.anchorX;
-                anchorY = layout.anchorY;
-                cellSize = (layout.cellSize * size + fineTune) / size;
-            } else {
-                const clueW = ctx.measureText('0'.repeat(rowClueCount)).width;
-                const clueH = 30 * colClueCount + 5;
-                const gridSize = Math.min(canvas.width - clueW, canvas.height - clueH);
-                cellSize = (gridSize + fineTune) / size;
-            }
-
-            ox = canvas.width - cellSize * size - anchorX;
-            oy = canvas.height - cellSize * size - anchorY;
-            const c = Math.floor((x - ox) / cellSize);
-            const r = Math.floor((y - oy) / cellSize);
-
-            if (r >= 0 && r < size && c >= 0 && c < size) {
-                hoveredRow = r;
-                hoveredCol = c;
-            } else {
-                hoveredRow = -1;
-                hoveredCol = -1;
-            }
-            if (isMarking) {
-                const c2 = Math.floor((x - ox) / cellSize);
-                const r2 = Math.floor((y - oy) / cellSize);
-                if (r2 >= 0 && r2 < size && c2 >= 0 && c2 < size) {
-                    const targetValue = eraseMode ? 0 : markValue;
-                    if (cellStates[r2][c2] !== targetValue) {
-                        currentAction.push({
-                            row: r2,
-                            col: c2,
-                            previous: cellStates[r2][c2],
-                            newValue: targetValue
-                        });
-                        cellStates[r2][c2] = targetValue;
-                        createGrid();
-                    }
-                }
-            }
-        });
+  canvas.addEventListener('mousemove', onCanvasMouseMove);
 
         canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
