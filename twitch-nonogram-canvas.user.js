@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.16
+// @version      4.20
 // @description  Nonogram overlay + status bars + persistent config
-// @author       mrpantera+menels+a lot of chatgpt
+// @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-start
@@ -21,7 +21,8 @@
         useBlueFill:         false,
         statusEnabled:       false,
         fineTuningEnabled:   false,
-        sharpeningEnabled:   false
+        sharpeningEnabled:   false,
+        autosendEnabled:     false
     };
     if (typeof uiConfig.sharpeningEnabled !== 'boolean') {
         uiConfig.sharpeningEnabled = false;
@@ -46,7 +47,7 @@
     let zoomFactor = DEFAULT_CONF.zoomFactor, fineTune = DEFAULT_CONF.fineTune;
     let roiWidthPercent = 0.36, roiHeightPercent = 0.584;
     let configs = JSON.parse(localStorage.getItem('nonogramConfigMap')) || {};
-
+    let autosendEnabled = uiConfig.autosendEnabled ?? false;
     let canvas, ctx, frame;
     let isDragging = false, dragOffsetX = 0, dragOffsetY = 0;
     let lastExported = new Set(), lastExportedWhite = new Set(), cellStates = [];
@@ -55,6 +56,14 @@
     let isMinimized = false, renderHandle = null;
     let minimizeBtn;
     let moveHistory = [], currentAction = null;
+    // ===== Autosend cooldown/queue =====
+    const COOLDOWN_MS = 10_000;
+    let nextSendAt = 0;            // timestamp when next send is allowed
+    let sendQueue = [];            // queued chat messages
+    let sendLoopTimer = null;      // setInterval handle
+    let progressTimer = null;      // setInterval handle for UI progress
+    let exportFillBtn = null;      // set in createMainButtons()
+    let exportEmptyBtn = null;     // set in createMainButtons()
 
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
     const statusRegions = [
@@ -232,7 +241,11 @@
                 }
             });
         });
-        if (coords.length) navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
+        if (coords.length) {
+            const msg = `!fill ${coords.join(' ')}`;
+            navigator.clipboard.writeText(msg);
+            if (autosendEnabled) scheduleSend(msg);
+        }
     }
 
     // ─── “Export All Black” (ignores lastExported, grabs every filled cell) ─────
@@ -256,7 +269,11 @@
                     }
                 });
             });
-            if (coords.length) navigator.clipboard.writeText(`!fill ${coords.join(' ')}`);
+            if (coords.length) {
+                const msg = `!fill ${coords.join(' ')}`;
+                navigator.clipboard.writeText(msg);
+                if (autosendEnabled) scheduleSend(msg);
+            }
         } else if (mode === 'white') {
             cellStates.forEach((row, r) => {
                 row.forEach((s, c) => {
@@ -267,7 +284,11 @@
                     }
                 });
             });
-            if (coords.length) navigator.clipboard.writeText(`!empty ${coords.join(' ')}`);
+            if (coords.length) {
+                const msg = `!empty ${coords.join(' ')}`;
+                navigator.clipboard.writeText(msg);
+                if (autosendEnabled) scheduleSend(msg);
+            }
         }
     }
 
@@ -285,8 +306,11 @@
             });
         });
         if (coords.length) {
-            navigator.clipboard.writeText(`!empty ${coords.join(' ')}`);
+            const msg = `!empty ${coords.join(' ')}`;
+            navigator.clipboard.writeText(msg);
+            if (autosendEnabled) scheduleSend(msg);
         }
+
     }
     function exportClearCommand() {
         const letters = 'abcdefghijklmnopqrstuvwxyz';
@@ -305,6 +329,139 @@
             alert(clearCmd);
         }
     }
+    function scheduleSend(msg) {
+  // queue and kick the loop
+  sendQueue.push(msg);
+  ensureSendLoop();
+  ensureProgressLoop();
+}
+// ========================
+// Twitch React Chat (no OAuth required)
+// ========================
+let current_chat;
+
+function send_message_with_event(message) {
+  if (!current_chat || !current_chat.props?.onSendMessage)
+    current_chat = get_current_chat();
+
+  if (current_chat?.props?.onSendMessage)
+    current_chat.props.onSendMessage(message);
+  else
+    console.error("Chat not available or missing onSendMessage. (Are you on a chat page and logged in?)");
+}
+
+function get_current_chat() {
+  try {
+    const chat_node = document.querySelector(`section[data-test-selector="chat-room-component-layout"]`);
+    if (!chat_node) return null;
+
+    const react_instance = get_react_instance(chat_node);
+    if (!react_instance) return null;
+
+    const chat_component = search_react_parents(react_instance, (node) =>
+      node.stateNode && node.stateNode.props && node.stateNode.props.onSendMessage
+    );
+
+    return chat_component ? chat_component.stateNode : null;
+  } catch (e) {
+    console.error("Error accessing chat:", e);
+    return null;
+  }
+}
+
+function get_react_instance(el) {
+  for (const k in el)
+    if (k.startsWith("__reactInternalInstance$") || k.startsWith("__reactFiber$"))
+      return el[k];
+  return null;
+}
+function search_react_parents(node, predicate, max_depth = 15, depth = 0) {
+  if (!node || depth > max_depth) return null;
+  try { if (predicate(node)) return node; } catch {}
+  return search_react_parents(node.return, predicate, max_depth, depth + 1);
+}
+function ensureSendLoop() {
+  if (sendLoopTimer) return;
+  sendLoopTimer = setInterval(() => {
+    const now = Date.now();
+    if (sendQueue.length > 0 && now >= nextSendAt) {
+      const next = sendQueue.shift();
+      try { send_message_with_event(next); } catch (e) { console.error(e); }
+      nextSendAt = now + COOLDOWN_MS;
+    }
+    // stop if nothing to do and cooldown expired
+    if (sendQueue.length === 0 && now >= nextSendAt) {
+      clearInterval(sendLoopTimer);
+      sendLoopTimer = null;
+    }
+  }, 250);
+}
+
+function ensureProgressLoop() {
+  if (progressTimer) return;
+  progressTimer = setInterval(updateCooldownUI, 100);
+}
+
+function stopProgressLoop() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+  // clear button visuals
+  setBtnProgress(exportFillBtn, null);
+  setBtnProgress(exportEmptyBtn, null);
+}
+
+function cooldownProgress01() {
+  const now = Date.now();
+  // When cooling down: 0 -> 1 over 10s. When ready: 1.
+  if (now < nextSendAt) return 1 - (nextSendAt - now) / COOLDOWN_MS;
+  // If messages are pending, keep bar full
+  if (sendQueue.length > 0) return 1;
+  return 1;
+}
+
+function updateCooldownUI() {
+  // Only show when autosend is enabled and we have buttons
+  if (!autosendEnabled || (!exportFillBtn && !exportEmptyBtn)) return;
+  const p = cooldownProgress01();
+  // Disable while cooling down or while a queue exists
+    const ready = (Date.now() >= nextSendAt) && (sendQueue.length === 0);
+    [exportFillBtn, exportEmptyBtn].forEach(btn => {
+        if (!btn) return;
+        btn.disabled = !ready;
+        btn.style.opacity = ready ? '1' : '0.7';
+        btn.style.cursor  = ready ? 'pointer' : 'not-allowed';
+    });
+  setBtnProgress(exportFillBtn, p);
+  setBtnProgress(exportEmptyBtn, p);
+
+  // Tooltip with time left
+  const now = Date.now();
+  const remain = Math.max(0, nextSendAt - now);
+  const seconds = Math.ceil(remain / 1000);
+  const title = remain > 0 ? `Cooldown: ${seconds}s` : (sendQueue.length ? `Queued: ${sendQueue.length}` : `Ready`);
+  if (exportFillBtn)  exportFillBtn.title  = title;
+  if (exportEmptyBtn) exportEmptyBtn.title = title;
+
+  // If autosend is off or nothing pending and cooldown done, we can stop loop
+  if (!autosendEnabled || (sendQueue.length === 0 && now >= nextSendAt)) {
+    stopProgressLoop();
+  }
+}
+
+// Paint a subtle progress fill behind the button label
+function setBtnProgress(btn, p) {
+  if (!btn) return;
+  if (p == null) {
+    btn.style.backgroundImage = '';
+    return;
+  }
+  const pct = Math.max(0, Math.min(1, p)) * 100;
+  // gradient fill from left → right; keeps your normal button color visible
+  btn.style.backgroundImage =
+    `linear-gradient(to right, rgba(0,200,0,0.35) ${pct}%, transparent ${pct}%)`;
+}
     function disableShrinks() {
         // Placeholder
     }
@@ -505,12 +662,12 @@
         if (isMinimized || canvas.style.display === 'none') {
             return;
         }
-    
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(roiCanvas, 0, 0);
         createGrid();
         if (statusEnabled) drawStatus();
-    
+
         if (!document.hidden) {
             renderHandle = requestAnimationFrame(render);
         } else {
@@ -821,8 +978,8 @@
         };
 
         // Left‐aligned buttons
-        container.appendChild(makeBtn('Export !fill', exportCells));
-        container.appendChild(makeBtn('Export !empty', exportWhiteCells));
+        exportFillBtn  = container.appendChild(makeBtn('Export !fill',  exportCells));
+        exportEmptyBtn = container.appendChild(makeBtn('Export !empty', exportWhiteCells));
         container.appendChild(makeBtn('Undo', () => {
             if (!moveHistory.length) return;
             const lastAction = moveHistory.pop();
@@ -1048,19 +1205,19 @@
         const panel = document.createElement('div');
         panel.id = 'extra-config-panel';
         panel.style.cssText = `
-            position: absolute;
-            top: 40px;
-            left: 0;
-            background: #f9f9f9;
-            padding: 12px;
-            border: 1px solid #333;
-            border-radius: 6px;
-            z-index: 10002;
-            display: none;
-            color: black;
-            font-size: 14px;
-            width: 200px;
-        `;
+        position: absolute;
+        top: 40px;
+        left: 0;
+        background: #f9f9f9;
+        padding: 12px;
+        border: 1px solid #333;
+        border-radius: 6px;
+        z-index: 10002;
+        display: none;
+        color: black;
+        font-size: 14px;
+        width: 200px;
+    `;
 
         // 1) Minimize toggle
         const minDiv = document.createElement('div');
@@ -1133,7 +1290,7 @@
         blueDiv.appendChild(blueChk);
         blueDiv.appendChild(blueLabel);
 
-        // 3) Status‐canvas toggle
+        // 3) Status-canvas toggle
         const statusDivToggle = document.createElement('div');
         statusDivToggle.style.marginTop = '8px';
         const statusChk = document.createElement('input');
@@ -1154,7 +1311,35 @@
         statusDivToggle.appendChild(statusChk);
         statusDivToggle.appendChild(statusLabel);
 
-        // 4) Fine-tuning toggle
+        // 4) Auto-send toggle (no OAuth)  ← NEW
+        const autosendDiv = document.createElement('div');
+        autosendDiv.style.marginTop = '8px';
+        const autosendChk = document.createElement('input');
+        autosendChk.type = 'checkbox';
+        autosendChk.id = 'chk-autosend';
+        autosendChk.checked = autosendEnabled; // requires: let autosendEnabled = uiConfig.autosendEnabled ?? false;
+        autosendChk.style.marginRight = '6px';
+        autosendChk.addEventListener('change', () => {
+            autosendEnabled = autosendChk.checked;
+            uiConfig.autosendEnabled = autosendEnabled;
+            saveUIConfig();
+
+            if (autosendEnabled) {
+                // Start queue + cooldown progress loops
+                if (typeof ensureSendLoop === 'function') ensureSendLoop();
+                if (typeof ensureProgressLoop === 'function') ensureProgressLoop();
+            } else {
+                // Stop/clear the progress UI
+                if (typeof stopProgressLoop === 'function') stopProgressLoop();
+            }
+        });
+        const autosendLabel = document.createElement('label');
+        autosendLabel.htmlFor = 'chk-autosend';
+        autosendLabel.textContent = 'Auto-send chat cmd';
+        autosendDiv.appendChild(autosendChk);
+        autosendDiv.appendChild(autosendLabel);
+
+        // 5) Fine-tuning toggle
         const fineDiv = document.createElement('div');
         fineDiv.style.marginTop = '8px';
         const fineChk = document.createElement('input');
@@ -1171,7 +1356,13 @@
                 fineSection.style.display = fineTuningEnabled ? 'block' : 'none';
             }
         });
-        // 5) Sharpen toggle
+        const fineLabel = document.createElement('label');
+        fineLabel.htmlFor = 'chk-fine';
+        fineLabel.textContent = 'Enable fine-tune controls';
+        fineDiv.appendChild(fineChk);
+        fineDiv.appendChild(fineLabel);
+
+        // 6) Sharpen toggle
         const sharpenDiv = document.createElement('div');
         sharpenDiv.style.marginTop = '8px';
         const sharpenChk = document.createElement('input');
@@ -1190,17 +1381,14 @@
         sharpenDiv.appendChild(sharpenChk);
         sharpenDiv.appendChild(sharpenLabel);
 
-        const fineLabel = document.createElement('label');
-        fineLabel.htmlFor = 'chk-fine';
-        fineLabel.textContent = 'Enable fine-tune controls';
-        fineDiv.appendChild(fineChk);
-        fineDiv.appendChild(fineLabel);
-
+        // Assemble in order
         panel.appendChild(minDiv);
         panel.appendChild(blueDiv);
         panel.appendChild(statusDivToggle);
+        panel.appendChild(autosendDiv); // ← NEW placement
         panel.appendChild(fineDiv);
         panel.appendChild(sharpenDiv);
+
         frame.appendChild(panel);
     }
 
@@ -1312,6 +1500,12 @@
         createConfigPanel();
         createControlAndStatus();
         createExtraConfigPanel();
+        if (autosendEnabled) {
+            // show “Ready” state right away
+            nextSendAt = Date.now();
+            ensureProgressLoop();
+            // send loop starts itself when there’s something in the queue
+        }
         render();
         setInterval(updateROI, 1000); // update ROI once per second
     });
