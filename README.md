@@ -4,11 +4,14 @@ A draggable nonogram puzzle overlay for Twitch streams, complete with canvas ren
 📦 Features
 🖼️ Draggable nonogram grid overlay
 
-✍️ Interactive grid: left-click to fill, right-click to mark as empty
+✍️ Interactive grid: left-click to fill, right-click to mark as empty. Left click on the clues to dash it as solved, right click to erase the line.
 
 🔍 Zoom controls (−, +, 1×)
 
-📋 "Export ✓" button to copy filled coordinates for !fill Twitch command
+📋 "Export ✓" button automatically sends the command to twitch 
+
+
+
 
 🛠 Installation
 Install Tampermonkey in your browser.
@@ -42,3 +45,6 @@ Reset button to default layout (4x4 with 1 clue)
 🖥️ No grid visible? Refresh the page, ensure you're on a matching URL (https://www.twitch.tv/goki*)
 
 📋 Export not working? Ensure browser permissions allow clipboard access
+
+
+Special thanks for mr_pantera666 for ideas and coding and for kurotaku for making his own code available (https://gist.github.com/Kurotaku-sama/55cabbdc14a21de2989f1b7ef9fed563) 
