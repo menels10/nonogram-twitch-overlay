@@ -860,8 +860,8 @@ function onCanvasMouseDown(e) {
     const col = Math.floor((x - ox) / cellSize);
     if (col >= 0 && col < size) {
       const pos = y - (oy - clueH); // vertical offset inside [0..clueH]
-      if (e.button === 2) addColDash(col, pos, clueH);     // Right click: add
-      else if (e.button === 0) removeNearestColDash(col, pos, 10); // Left: remove
+      if (e.button === 0) addColDash(col, pos, clueH);     // Right click: add
+      else if (e.button === 2) removeNearestColDash(col, pos, 10); // Left: remove
       createGrid();
       return;
     }
@@ -872,8 +872,8 @@ function onCanvasMouseDown(e) {
   if (inLeftClues) {
     const row = Math.floor((y - oy) / cellSize);
     if (row >= 0 && row < size) {
-      if (e.button === 2) addRowDash(row, x);            // Right click: add at canvas X
-      else if (e.button === 0) removeNearestRowDash(row, x, 10); // Left: remove nearest
+      if (e.button === 0) addRowDash(row, x);            // Right click: add at canvas X
+      else if (e.button === 2) removeNearestRowDash(row, x, 10); // Left: remove nearest
       createGrid();
       return;
     }
