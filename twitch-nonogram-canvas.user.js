@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.21
+// @version      4.25
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -183,7 +183,115 @@ let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
         "20_9": { cellSize: 13.3, anchorX: 3.5, anchorY: 7 },
         "20_10": { cellSize: 12, anchorX: 3.5, anchorY: 7 },
     };
+// === Twitch Reward Redeemer Core Functions ===
 
+const TARGET_REWARD_NAME = "Activity Coupon"; // change to your reward name
+const PANEL_WAIT_TIMEOUT = 400;
+const CONFIRM_POLL_INTERVAL = 150;
+const CONFIRM_MAX_ATTEMPTS = 30;
+
+function findPanelButton() {
+    return document.querySelector('button[aria-label="Bits and Points Balances"]') ||
+           document.querySelector('[data-test-selector="community-points-summary"] button') ||
+           document.querySelector('button[data-test-selector="community-points-summary-button"]');
+}
+
+function openPanel() {
+    const btn = findPanelButton();
+    if (!btn) return false;
+    btn.click();
+    return true;
+}
+
+function waitForAnySelector(selectors, timeout = 3000) {
+    const start = Date.now();
+    return new Promise(resolve => {
+        const tick = () => {
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el) return resolve(el);
+            }
+            if (Date.now() - start >= timeout) return resolve(null);
+            setTimeout(tick, 50);
+        };
+        tick();
+    });
+}
+
+function clickFirstLayerInPanel() {
+    const rewardItems = Array.from(document.querySelectorAll('.reward-list-item, .goosYB.reward-list-item, .bitsRewardListItem--yx4rk'));
+    if (!rewardItems.length) return false;
+
+    for (const item of rewardItems) {
+        const titleEl =
+            item.querySelector('div.ipRTld > p') ||
+            item.querySelector('p[title]') ||
+            item.querySelector('.CoreText-sc-1txzju1-0') ||
+            item.querySelector('p');
+
+        const title = titleEl ? titleEl.innerText.trim() : item.innerText.trim();
+        if (!title) continue;
+
+        if (title.includes(TARGET_REWARD_NAME)) {
+            const btn = item.querySelector('button') || item.querySelector('button.tw-interactable');
+            if (!btn || btn.disabled) return false;
+            btn.click();
+            return true;
+        }
+    }
+    return false;
+}
+
+function pollAndClickConfirm() {
+    return new Promise(resolve => {
+        let attempts = 0;
+        const poll = setInterval(() => {
+            attempts++;
+            const confirmButton = Array.from(document.querySelectorAll('button'))
+                .find(b => (b.innerText || '').trim().toLowerCase().includes('redeem'));
+
+            if (confirmButton) {
+                const ariaAncestor = confirmButton.closest('[aria-hidden]');
+                if (!ariaAncestor || ariaAncestor.getAttribute('aria-hidden') !== 'true') {
+                    try { confirmButton.click(); } catch (e) {}
+                    clearInterval(poll);
+                    resolve();
+                    return;
+                }
+            }
+
+            if (attempts >= CONFIRM_MAX_ATTEMPTS) {
+                clearInterval(poll);
+                resolve();
+            }
+        }, CONFIRM_POLL_INTERVAL);
+    });
+}
+
+let busy = false;
+async function attemptRedeemCycle() {
+    if (busy) return;
+    busy = true;
+
+    const opened = openPanel();
+    if (!opened) { busy = false; return; }
+
+    const rewardPanel = await waitForAnySelector(
+        ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
+        PANEL_WAIT_TIMEOUT
+    );
+
+    if (!rewardPanel) { busy = false; return; }
+
+    const firstClicked = clickFirstLayerInPanel();
+
+    if (firstClicked) {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        await pollAndClickConfirm();
+    }
+
+    busy = false;
+}
     function getKey(sz, rc, cc) {
         return `${sz}x${rc}x${cc}`;
     }
@@ -956,6 +1064,8 @@ function onCanvasMouseDown(e) {
 
   createGrid();
 }
+
+
     function setupCanvas() {
         frame = document.createElement('div');
         frame.id = 'draggable-frame';
@@ -1124,6 +1234,10 @@ canvas.addEventListener('mousedown', onCanvasMouseDown);
         container.appendChild(makeBtn('Clean grid', cleanAll));
         container.appendChild(makeBtn('⚙️ Config', () => {
             toggleExtraConfigPanel();
+        }));
+        container.appendChild(makeBtn('Activity Coupon', () => {
+            console.log("[Main Script] Manual redeem triggered via button.");
+            attemptRedeemCycle();   // Calls the DOM-based redeemer
         }));
     }
 
