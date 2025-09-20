@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.25
+// @version      4.30
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -64,9 +64,107 @@
     let progressTimer = null;      // setInterval handle for UI progress
     let exportFillBtn = null;      // set in createMainButtons()
     let exportEmptyBtn = null;     // set in createMainButtons()
-// Clue dashes (left/top bands)
-let rowDashes = [];   // array per row -> [canvasX,...]
-let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
+    // Clue dashes (left/top bands)
+    let rowDashes = [];   // array per row -> [canvasX,...]
+    let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
+    // ---- Redemption Tracking ----
+    let redeemBtn;
+const REDEEM_KEY = "lastRedeemTimestamp";
+function setLastRedeem() {
+    localStorage.setItem(REDEEM_KEY, Date.now().toString());
+}
+function getLastRedeem() {
+    return parseInt(localStorage.getItem(REDEEM_KEY) || "0", 10);
+}
+function minutesSinceRedeem() {
+    return (Date.now() - getLastRedeem()) / 60000;
+}
+
+// Wrap attemptRedeemCycle to record timestamp
+async function redeemAndTrack() {
+    console.log("[Reward Redeemer] Redeeming reward...");
+    await attemptRedeemCycle();
+    lastRedeemTime = Date.now();
+    updateCouponButtonColor();
+    scheduleAutoRedeem(); // reset the timer after *any* redeem
+}
+// ---- Auto-Redeem Scheduler ----
+let autoRedeemEnabled = false; // test if redemption is working
+let autoRedeemTimer = null;   // store active timer
+function scheduleAutoRedeem() {
+    if (!autoRedeemEnabled) return;
+
+    // Clear any existing timer before making a new one
+    if (autoRedeemTimer) {
+        clearTimeout(autoRedeemTimer);
+        autoRedeemTimer = null;
+    }
+
+    const delay = (40 + Math.random() * 15) * 60000; // 40–55 minutes
+    console.log(`[Reward Redeemer] Next auto redeem in ${(delay/60000).toFixed(1)} min`);
+
+    autoRedeemTimer = setTimeout(async () => {
+        await redeemAndTrack();
+        scheduleAutoRedeem(); // re-schedule after redemption
+    }, delay);
+}
+scheduleAutoRedeem();
+function createRedeemButton() {
+    redeemBtn = document.createElement('button');
+    redeemBtn.textContent = '🎟️ Redeem Reward';
+    redeemBtn.style.position = 'fixed';
+    redeemBtn.style.bottom = '20px';
+    redeemBtn.style.right = '20px';
+    redeemBtn.style.zIndex = '9999';
+    redeemBtn.style.padding = '10px 15px';
+    redeemBtn.style.background = '#9146FF';
+    redeemBtn.style.color = 'white';
+    redeemBtn.style.border = 'none';
+    redeemBtn.style.borderRadius = '6px';
+    redeemBtn.style.fontWeight = 'bold';
+    redeemBtn.style.cursor = 'pointer';
+    redeemBtn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+
+    redeemBtn.addEventListener('click', () => {
+        console.log('[Reward Redeemer] Manual redeem triggered.');
+        redeemAndTrack();
+    });
+
+    document.body.appendChild(redeemBtn);
+
+    // start monitoring after button is created
+    startRedeemButtonMonitor();
+}
+
+// update button color based on time since last redeem
+function startRedeemButtonMonitor() {
+    setInterval(() => {
+        if (!redeemBtn) return;
+
+        const mins = minutesSinceRedeem();
+
+        if (mins > 45) {
+            // long overdue
+            redeemBtn.style.background = '#b22222'; // dark red
+        } else if (mins > 30) {
+            // warning zone
+            redeemBtn.style.background = '#ff4444'; // bright red
+        } else {
+            // normal
+            redeemBtn.style.background = '#9146FF'; // twitch purple
+        }
+    }, 60000); // check every 60s
+}
+// ---- Export Hook ----
+async function guardedExport(fn, ...args) {
+    if (minutesSinceRedeem() > 55) {
+        console.log("[Reward Redeemer] Coupon expired, redeeming new one...");
+        await redeemAndTrack();
+        const waitMs = (8 + Math.random() * 7) * 1000;
+        await new Promise(r => setTimeout(r, waitMs));
+    }
+    return fn(...args);
+}
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
     const statusRegions = [
         { sx: 200, sy: 980, sw: 250, sh: 70 },
@@ -186,8 +284,8 @@ let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
 // === Twitch Reward Redeemer Core Functions ===
 
 const TARGET_REWARD_NAME = "Activity Coupon"; // change to your reward name
-const PANEL_WAIT_TIMEOUT = 400;
-const CONFIRM_POLL_INTERVAL = 150;
+const PANEL_WAIT_TIMEOUT = 800;
+const CONFIRM_POLL_INTERVAL = 300;
 const CONFIRM_MAX_ATTEMPTS = 30;
 
 function findPanelButton() {
@@ -504,6 +602,25 @@ function resetClueDashes() {
   ensureSendLoop();
   ensureProgressLoop();
 }
+// ─── Save Originals ─────────────────────────────
+const _exportAllCells = exportAllCells;
+const _exportWhiteCells = exportWhiteCells;
+const _exportCells = exportCells;
+const _cleanAll = cleanAll;
+
+// ─── Replace With Guarded Versions ──────────────
+exportAllCells = function(mode) {
+    return guardedExport(_exportAllCells, mode);
+};
+exportWhiteCells = function() {
+    return guardedExport(_exportWhiteCells);
+};
+exportCells = function() {
+    return guardedExport(_exportCells);
+};
+cleanAll = function() {
+    return guardedExport(_cleanAll);
+};
 // ========================
 // Twitch React Chat (no OAuth required)
 // ========================
@@ -1159,87 +1276,143 @@ canvas.addEventListener('mousedown', onCanvasMouseDown);
         });
     }
 
-    function createMainButtons() {
-        const container = document.createElement('div');
-        container.id = 'button-container';
-        container.style.cssText = `
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            display: flex;
-            align-items: center;
-            padding: 6px 8px;
-            z-index: 10001;
-            pointer-events: auto;
-            background: rgba(0,0,0,0.5);
-            border-top: 1px solid #333;
-        `;
-        frame.appendChild(container);
-
-        const makeBtn = (label, onClick) => {
-            const btn = document.createElement('button');
-            btn.textContent = label;
-            btn.style.cssText = `
-                padding: 4px 8px;
-                background: #fff;
-                border: 1px solid #000;
-                border-radius: 3px;
-                font-size: 13px;
-                color: black;
-                cursor: pointer;
-                transition: background 0.2s ease;
-            `;
-            btn.onmouseenter = () => btn.style.background = '#f0f0f0';
-            btn.onmouseleave = () => btn.style.background = '#fff';
-            btn.onclick = onClick;
-            return btn;
-        };
-
-        // Left‐aligned buttons
-        exportFillBtn  = container.appendChild(makeBtn('Export !fill',  exportCells));
-        exportEmptyBtn = container.appendChild(makeBtn('Export !empty', exportWhiteCells));
-        container.appendChild(makeBtn('Undo', () => {
-            if (!moveHistory.length) return;
-            const lastAction = moveHistory.pop();
-            lastAction.forEach(({ row, col, previous, newValue }) => {
-                // Compute the coordinate string
-                const coord = `${String.fromCharCode(97 + col)}${row + 1}`;
-
-                // If the undone action had painted a black cell (newValue === 1), remove it from lastExported
-                if (newValue === 1) {
-                    lastExported.delete(coord);
-                }
-
-                // If the undone action had painted a white cell (newValue === 2), remove it from lastExportedWhite
-                if (newValue === 2) {
-                    lastExportedWhite.delete(coord);
-                }
-
-                // Revert the cell state
-                cellStates[row][col] = previous;
-            });
-
-            createGrid();
-        }));
-
-
-        // Spacer pushes the next buttons to the right
-        const spacer = document.createElement('div');
-        spacer.style.flex = '1';
-        container.appendChild(spacer);
-
-        // Right‐aligned buttons
-        container.appendChild(makeBtn('reset export', exportAllCells));
-        container.appendChild(makeBtn('Clean grid', cleanAll));
-        container.appendChild(makeBtn('⚙️ Config', () => {
-            toggleExtraConfigPanel();
-        }));
-        container.appendChild(makeBtn('Activity Coupon', () => {
-            console.log("[Main Script] Manual redeem triggered via button.");
-            attemptRedeemCycle();   // Calls the DOM-based redeemer
-        }));
+function createMainButtons() {
+    // clear any previous monitor interval to avoid duplicates
+    if (window.redeemMonitorIntervalId) {
+        clearInterval(window.redeemMonitorIntervalId);
+        window.redeemMonitorIntervalId = null;
     }
+
+    const container = document.createElement('div');
+    container.id = 'button-container';
+    container.style.cssText = `
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: center;
+        padding: 6px 8px;
+        z-index: 10001;
+        pointer-events: auto;
+        background: rgba(0,0,0,0.5);
+        border-top: 1px solid #333;
+    `;
+    frame.appendChild(container);
+
+    const makeBtn = (label, onClick) => {
+        const btn = document.createElement('button');
+        btn.textContent = label;
+        btn.style.cssText = `
+            padding: 4px 8px;
+            background: #fff;
+            border: 1px solid #000;
+            border-radius: 3px;
+            font-size: 13px;
+            color: black;
+            cursor: pointer;
+            transition: background 0.15s ease, opacity 0.15s ease;
+        `;
+        btn.onmouseenter = () => btn.style.background = '#f0f0f0';
+        btn.onmouseleave = () => btn.style.background = '#fff';
+        btn.onclick = onClick;
+        return btn;
+    };
+
+    // Left‐aligned buttons
+    exportFillBtn  = container.appendChild(makeBtn('Export !fill',  exportCells));
+    exportEmptyBtn = container.appendChild(makeBtn('Export !empty', exportWhiteCells));
+    container.appendChild(makeBtn('Undo', () => {
+        if (!moveHistory.length) return;
+        const lastAction = moveHistory.pop();
+        lastAction.forEach(({ row, col, previous, newValue }) => {
+            const coord = `${String.fromCharCode(97 + col)}${row + 1}`;
+            if (newValue === 1) lastExported.delete(coord);
+            if (newValue === 2) lastExportedWhite.delete(coord);
+            cellStates[row][col] = previous;
+        });
+        createGrid();
+    }));
+
+    // Spacer pushes the next buttons to the right
+    const spacer = document.createElement('div');
+    spacer.style.flex = '1';
+    container.appendChild(spacer);
+
+    // Right‐aligned buttons
+    container.appendChild(makeBtn('reset export', exportAllCells));
+    container.appendChild(makeBtn('Clean grid', cleanAll));
+    container.appendChild(makeBtn('⚙️ Config', () => {
+        toggleExtraConfigPanel();
+    }));
+
+    // ---- Activity Coupon button (special behaviour) ----
+    const activityBtn = makeBtn('🎟️ Activity Coupon', async () => {
+        if (activityBtn.disabled) return;
+        try {
+            activityBtn.disabled = true;
+            activityBtn.style.opacity = '0.7';
+            activityBtn.textContent = '⏳ Redeeming...';
+            await redeemAndTrack(); // uses attemptRedeemCycle() and records timestamp
+        } catch (e) {
+            console.error('Redeem error:', e);
+        } finally {
+            // restore text (icon + label)
+            activityBtn.textContent = '🎟️ Activity Coupon';
+            activityBtn.disabled = false;
+            activityBtn.style.opacity = '1';
+            updateActivityBtnStyle(activityBtn);
+        }
+    });
+
+    // override hover handlers to respect alert state
+    activityBtn.onmouseenter = () => {
+        const state = activityBtn.dataset.alert;
+        if (!state) activityBtn.style.background = '#f0f0f0';
+        else if (state === 'warning') activityBtn.style.background = '#ff2a2a';
+        else if (state === 'overdue') activityBtn.style.background = '#8b1a1a';
+    };
+    activityBtn.onmouseleave = () => {
+        updateActivityBtnStyle(activityBtn);
+    };
+
+    // helper to set the activity button style based on minutes since last redeem
+    function updateActivityBtnStyle(btn) {
+        const mins = (typeof minutesSinceRedeem === 'function') ? minutesSinceRedeem() : Infinity;
+
+        // default (fresh): white background, black text, normal border
+        if (isNaN(mins) || mins < 50) {
+            btn.dataset.alert = '';
+            btn.style.background = '#fff';
+            btn.style.color = 'black';
+            btn.style.border = '1px solid #000';
+        }
+        // warning zone: 50–55 minutes
+        else if (mins >= 50 && mins <= 55) {
+            btn.dataset.alert = 'warning';
+            btn.style.background = '#ff4444';
+            btn.style.color = 'white';
+            btn.style.border = '1px solid #cc0000';
+        }
+        // overdue: >55 minutes
+        else {
+            btn.dataset.alert = 'overdue';
+            btn.style.background = '#b22222';
+            btn.style.color = 'white';
+            btn.style.border = '1px solid #800000';
+        }
+    }
+
+    // append activity button last (right side)
+    container.appendChild(activityBtn);
+
+    // start periodic monitor that updates only the activity button
+    updateActivityBtnStyle(activityBtn); // immediate update
+    window.redeemMonitorIntervalId = setInterval(() => {
+        updateActivityBtnStyle(activityBtn);
+    }, 30_000); // every 30s
+}
+
 
     let labelMap = {};
     let controlSections = [];
