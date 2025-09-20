@@ -91,7 +91,7 @@ async function redeemAndTrack() {
     scheduleAutoRedeem(); // reset the timer after *any* redeem
 }
 // ---- Auto-Redeem Scheduler ----
-let autoRedeemEnabled = true; // test if redemption is working
+let autoRedeemEnabled = false; // test if redemption is working
 let autoRedeemTimer = null;   // store active timer
 function scheduleAutoRedeem() {
     if (!autoRedeemEnabled) return;
