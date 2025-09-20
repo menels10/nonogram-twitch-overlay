@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.31
+// @version      4.32
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -70,8 +70,8 @@
     // ---- Redemption Tracking ----
     let redeemBtn;
     let guard_Export = true; // toggleable in config panel
-
-const REDEEM_KEY = "lastRedeemTimestamp";
+    let lastGuardRedeem = 0; // timestamp of last auto-redeem from guard
+    const REDEEM_KEY = "lastRedeemTimestamp";
 function setLastRedeem() {
     localStorage.setItem(REDEEM_KEY, Date.now().toString());
 }
@@ -160,17 +160,21 @@ function startRedeemButtonMonitor() {
 // ---- Export Hook ----
 async function guardedExport(fn, ...args) {
     if (!guard_Export) {
-        // Guard disabled → just run immediately
+        // Guarding disabled → always run directly
         return fn(...args);
     }
 
-    if (minutesSinceRedeem() > 55) {
-        console.log("[Reward Redeemer] Coupon expired, redeeming new one...");
+    const minutes = minutesSinceRedeem();
+    const now = Date.now();
+
+    if (minutes > 55 && (now - lastGuardRedeem) > 1 * 60 * 1000) {
+        console.log("[Reward Redeemer] Coupon expired, redeeming new one (guard).");
+        lastGuardRedeem = now; // mark cooldown immediately to avoid spam
         await redeemAndTrack();
-        const waitMs = (8 + Math.random() * 7) * 1000;
-        console.log(`[Reward Redeemer] Waiting ${(waitMs/1000).toFixed(1)}s before export...`);
+        const waitMs = (8 + Math.random() * 7) * 1000; // 8–15 sec delay
         await new Promise(r => setTimeout(r, waitMs));
     }
+
     return fn(...args);
 }
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
