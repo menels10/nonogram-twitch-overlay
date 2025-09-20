@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.30
+// @version      4.31
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -69,6 +69,8 @@
     let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
     // ---- Redemption Tracking ----
     let redeemBtn;
+    let guard_Export = true; // toggleable in config panel
+
 const REDEEM_KEY = "lastRedeemTimestamp";
 function setLastRedeem() {
     localStorage.setItem(REDEEM_KEY, Date.now().toString());
@@ -89,7 +91,7 @@ async function redeemAndTrack() {
     scheduleAutoRedeem(); // reset the timer after *any* redeem
 }
 // ---- Auto-Redeem Scheduler ----
-let autoRedeemEnabled = false; // test if redemption is working
+let autoRedeemEnabled = true; // test if redemption is working
 let autoRedeemTimer = null;   // store active timer
 function scheduleAutoRedeem() {
     if (!autoRedeemEnabled) return;
@@ -157,10 +159,16 @@ function startRedeemButtonMonitor() {
 }
 // ---- Export Hook ----
 async function guardedExport(fn, ...args) {
+    if (!guard_Export) {
+        // Guard disabled → just run immediately
+        return fn(...args);
+    }
+
     if (minutesSinceRedeem() > 55) {
         console.log("[Reward Redeemer] Coupon expired, redeeming new one...");
         await redeemAndTrack();
         const waitMs = (8 + Math.random() * 7) * 1000;
+        console.log(`[Reward Redeemer] Waiting ${(waitMs/1000).toFixed(1)}s before export...`);
         await new Promise(r => setTimeout(r, waitMs));
     }
     return fn(...args);
@@ -345,8 +353,7 @@ function pollAndClickConfirm() {
         let attempts = 0;
         const poll = setInterval(() => {
             attempts++;
-            const confirmButton = Array.from(document.querySelectorAll('button'))
-                .find(b => (b.innerText || '').trim().toLowerCase().includes('redeem'));
+            const confirmButton = document.querySelector('button:has(p[data-test-selector="RewardText"])');
 
             if (confirmButton) {
                 const ariaAncestor = confirmButton.closest('[aria-hidden]');
@@ -1381,20 +1388,20 @@ function createMainButtons() {
         const mins = (typeof minutesSinceRedeem === 'function') ? minutesSinceRedeem() : Infinity;
 
         // default (fresh): white background, black text, normal border
-        if (isNaN(mins) || mins < 50) {
+        if (isNaN(mins) || mins < 30) {
             btn.dataset.alert = '';
             btn.style.background = '#fff';
             btn.style.color = 'black';
             btn.style.border = '1px solid #000';
         }
-        // warning zone: 50–55 minutes
-        else if (mins >= 50 && mins <= 55) {
+        // warning zone: 30–45 minutes
+        else if (mins >= 30 && mins <= 45) {
             btn.dataset.alert = 'warning';
             btn.style.background = '#ff4444';
             btn.style.color = 'white';
             btn.style.border = '1px solid #cc0000';
         }
-        // overdue: >55 minutes
+        // overdue: >45 minutes
         else {
             btn.dataset.alert = 'overdue';
             btn.style.background = '#b22222';
@@ -1776,12 +1783,35 @@ function createMainButtons() {
         sharpenLabel.textContent = 'Enable sharpen filter';
         sharpenDiv.appendChild(sharpenChk);
         sharpenDiv.appendChild(sharpenLabel);
+        // 7) Guard Export toggle
+        const guardDiv = document.createElement('div');
+        guardDiv.style.marginTop = '8px';
 
+        const guardChk = document.createElement('input');
+        guardChk.type = 'checkbox';
+        guardChk.id = 'chk-guard';
+        guardChk.checked = guard_Export; // requires: let guard_Export = uiConfig.guard_Export ?? true;
+        guardChk.style.marginRight = '6px';
+        guardChk.addEventListener('change', () => {
+            guard_Export = guardChk.checked;
+            uiConfig.guard_Export = guard_Export;
+            saveUIConfig();
+        });
+
+        const guardLabel = document.createElement('label');
+        guardLabel.htmlFor = 'chk-guard';
+        guardLabel.textContent = 'Guard exports (redeem check)';
+        guardDiv.appendChild(guardChk);
+        guardDiv.appendChild(guardLabel);
+
+        // Add it to panel
+        panel.appendChild(autosendDiv); // ← NEW placement
+        panel.appendChild(guardDiv);
         // Assemble in order
         panel.appendChild(minDiv);
         panel.appendChild(blueDiv);
         panel.appendChild(statusDivToggle);
-        panel.appendChild(autosendDiv); // ← NEW placement
+        
         panel.appendChild(fineDiv);
         panel.appendChild(sharpenDiv);
 
