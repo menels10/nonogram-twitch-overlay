@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.32
+// @version      4.35
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -64,6 +64,12 @@
     let progressTimer = null;      // setInterval handle for UI progress
     let exportFillBtn = null;      // set in createMainButtons()
     let exportEmptyBtn = null;     // set in createMainButtons()
+    // --- cleanup on unload ---
+    window.addEventListener("beforeunload", () => {
+        if (redeemButtonMonitorId) clearInterval(redeemButtonMonitorId);
+        if (activityBtnMonitorId) clearInterval(activityBtnMonitorId);
+        if (progressTimer) clearInterval(progressTimer);
+    });
     // Clue dashes (left/top bands)
     let rowDashes = [];   // array per row -> [canvasX,...]
     let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
@@ -71,24 +77,52 @@
     let redeemBtn;
     let guard_Export = true; // toggleable in config panel
     let lastGuardRedeem = 0; // timestamp of last auto-redeem from guard
+
     const REDEEM_KEY = "lastRedeemTimestamp";
-function setLastRedeem() {
-    localStorage.setItem(REDEEM_KEY, Date.now().toString());
-}
-function getLastRedeem() {
-    return parseInt(localStorage.getItem(REDEEM_KEY) || "0", 10);
-}
-function minutesSinceRedeem() {
-    return (Date.now() - getLastRedeem()) / 60000;
+    // --- Redeem button monitor ---
+let redeemButtonMonitorId = null;
+let activityBtnMonitorId = null;
+function setLastRedeem(ts = Date.now()) {
+  try {
+    localStorage.setItem(REDEEM_KEY, String(ts));
+  } catch (e) {
+    console.warn("[Reward Redeemer] setLastRedeem failed:", e);
+  }
 }
 
-// Wrap attemptRedeemCycle to record timestamp
+function getLastRedeem() {
+  const v = parseInt(localStorage.getItem(REDEEM_KEY) || "0", 10);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function minutesSinceRedeem() {
+  return (Date.now() - getLastRedeem()) / 60000;
+}
+let redeemBusy = false;
 async function redeemAndTrack() {
+  if (redeemBusy) {
+    console.log("[Reward Redeemer] Another redeem is in progress — skipping.");
+    return;
+  }
+  redeemBusy = true;
+  try {
     console.log("[Reward Redeemer] Redeeming reward...");
-    await attemptRedeemCycle();
-    lastRedeemTime = Date.now();
-    updateCouponButtonColor();
-    scheduleAutoRedeem(); // reset the timer after *any* redeem
+    const success = await attemptRedeemCycle();
+    if (success) {
+      setLastRedeem();            // <-- single place we persist the timestamp
+      lastGuardRedeem = Date.now(); // keep the in-memory cooldown in sync too
+      // update UI: call your button styling helper if available
+      if (typeof updateActivityBtnStyle === 'function') {
+        // if you have a reference to activityBtn, call with it
+        try { updateActivityBtnStyle(activityBtn); } catch {}
+      }
+      scheduleAutoRedeem(); // re-schedule
+    } else {
+      console.log("[Reward Redeemer] Redeem attempt did not complete (timed out or no button).");
+    }
+  } finally {
+    redeemBusy = false;
+  }
 }
 // ---- Auto-Redeem Scheduler ----
 let autoRedeemEnabled = false; // test if redemption is working
@@ -138,24 +172,33 @@ function createRedeemButton() {
     startRedeemButtonMonitor();
 }
 
-// update button color based on time since last redeem
 function startRedeemButtonMonitor() {
-    setInterval(() => {
-        if (!redeemBtn) return;
+  // Clear any previous monitor
+  if (redeemButtonMonitorId) {
+    clearInterval(redeemButtonMonitorId);
+    redeemButtonMonitorId = null;
+  }
 
-        const mins = minutesSinceRedeem();
+  redeemButtonMonitorId = setInterval(() => {
+    if (!redeemBtn) return;
 
-        if (mins > 45) {
-            // long overdue
-            redeemBtn.style.background = '#b22222'; // dark red
-        } else if (mins > 30) {
-            // warning zone
-            redeemBtn.style.background = '#ff4444'; // bright red
-        } else {
-            // normal
-            redeemBtn.style.background = '#9146FF'; // twitch purple
-        }
-    }, 60000); // check every 60s
+    const mins = minutesSinceRedeem();
+    if (mins > 45) {
+      redeemBtn.style.background = '#b22222'; // dark red
+    } else if (mins > 30) {
+      redeemBtn.style.background = '#ff4444'; // bright red
+    } else {
+      redeemBtn.style.background = '#9146FF'; // twitch purple
+    }
+  }, 60_000); // every 60s
+}
+
+// Call this when destroying UI (optional safeguard)
+function stopRedeemButtonMonitor() {
+  if (redeemButtonMonitorId) {
+    clearInterval(redeemButtonMonitorId);
+    redeemButtonMonitorId = null;
+  }
 }
 // ---- Export Hook ----
 async function guardedExport(fn, ...args) {
@@ -167,14 +210,21 @@ async function guardedExport(fn, ...args) {
     const minutes = minutesSinceRedeem();
     const now = Date.now();
 
-    if (minutes > 55 && (now - lastGuardRedeem) > 1 * 60 * 1000) {
-        console.log("[Reward Redeemer] Coupon expired, redeeming new one (guard).");
-        lastGuardRedeem = now; // mark cooldown immediately to avoid spam
-        await redeemAndTrack();
-        const waitMs = (8 + Math.random() * 7) * 1000; // 8–15 sec delay
-        await new Promise(r => setTimeout(r, waitMs));
+    // require coupon to be older than 55 minutes
+    if (minutes > 55) {
+        // short anti-spam lock: block repeat attempts in <1 min
+        if (now - lastGuardRedeem < 60_000) {
+            console.log("[Reward Redeemer] Guarded export skipped — redeem already attempted recently.");
+            return;
+        }
+
+        console.log("[Reward Redeemer] Guarded export requires redeem...");
+        lastGuardRedeem = now;
+
+        await redeemAndTrack();  // this will call setLastRedeem() internally
     }
 
+    // Always perform the export after redeem check
     return fn(...args);
 }
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
@@ -353,53 +403,53 @@ function clickFirstLayerInPanel() {
 }
 
 function pollAndClickConfirm() {
-    return new Promise(resolve => {
-        let attempts = 0;
-        const poll = setInterval(() => {
-            attempts++;
-            const confirmButton = document.querySelector('button:has(p[data-test-selector="RewardText"])');
+  return new Promise(resolve => {
+    let attempts = 0;
+    const poll = setInterval(() => {
+      attempts++;
+      const confirmButton = document.querySelector('button:has(p[data-test-selector="RewardText"])');
 
-            if (confirmButton) {
-                const ariaAncestor = confirmButton.closest('[aria-hidden]');
-                if (!ariaAncestor || ariaAncestor.getAttribute('aria-hidden') !== 'true') {
-                    try { confirmButton.click(); } catch (e) {}
-                    clearInterval(poll);
-                    resolve();
-                    return;
-                }
-            }
+      if (confirmButton) {
+        const ariaAncestor = confirmButton.closest('[aria-hidden]');
+        if (!ariaAncestor || ariaAncestor.getAttribute('aria-hidden') !== 'true') {
+          try { confirmButton.click(); } catch (e) {}
+          clearInterval(poll);
+          resolve(true);   // <-- success
+          return;
+        }
+      }
 
-            if (attempts >= CONFIRM_MAX_ATTEMPTS) {
-                clearInterval(poll);
-                resolve();
-            }
-        }, CONFIRM_POLL_INTERVAL);
-    });
+      if (attempts >= CONFIRM_MAX_ATTEMPTS) {
+        clearInterval(poll);
+        resolve(false);  // <-- timed out / no confirm
+      }
+    }, CONFIRM_POLL_INTERVAL);
+  });
 }
-
 let busy = false;
 async function attemptRedeemCycle() {
-    if (busy) return;
-    busy = true;
-
+  if (busy) return false;
+  busy = true;
+  try {
     const opened = openPanel();
-    if (!opened) { busy = false; return; }
+    if (!opened) { return false; }
 
     const rewardPanel = await waitForAnySelector(
         ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
         PANEL_WAIT_TIMEOUT
     );
-
-    if (!rewardPanel) { busy = false; return; }
+    if (!rewardPanel) { return false; }
 
     const firstClicked = clickFirstLayerInPanel();
+    if (!firstClicked) { return false; }
 
-    if (firstClicked) {
-        await new Promise(resolve => setTimeout(resolve, 400));
-        await pollAndClickConfirm();
-    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const confirmed = await pollAndClickConfirm(); // true if clicked confirm
 
+    return !!confirmed;
+  } finally {
     busy = false;
+  }
 }
     function getKey(sz, rc, cc) {
         return `${sz}x${rc}x${cc}`;
@@ -1286,13 +1336,13 @@ canvas.addEventListener('mousedown', onCanvasMouseDown);
             e.preventDefault();
         });
     }
-
 function createMainButtons() {
-    // clear any previous monitor interval to avoid duplicates
-    if (window.redeemMonitorIntervalId) {
-        clearInterval(window.redeemMonitorIntervalId);
-        window.redeemMonitorIntervalId = null;
-    }
+  // clear monitor before setting new one
+  if (activityBtnMonitorId) {
+    clearInterval(activityBtnMonitorId);
+    activityBtnMonitorId = null;
+  }
+
 
     const container = document.createElement('div');
     container.id = 'button-container';
@@ -1372,7 +1422,11 @@ function createMainButtons() {
             activityBtn.textContent = '🎟️ Activity Coupon';
             activityBtn.disabled = false;
             activityBtn.style.opacity = '1';
+            // start periodic monitor for the activity button
             updateActivityBtnStyle(activityBtn);
+            activityBtnMonitorId = setInterval(() => {
+                updateActivityBtnStyle(activityBtn);
+            }, 30_000);
         }
     });
 
@@ -1414,14 +1468,14 @@ function createMainButtons() {
         }
     }
 
-    // append activity button last (right side)
+  // append activity button last (right side)
     container.appendChild(activityBtn);
 
-    // start periodic monitor that updates only the activity button
+    // start periodic monitor for the activity button
     updateActivityBtnStyle(activityBtn); // immediate update
-    window.redeemMonitorIntervalId = setInterval(() => {
+    activityBtnMonitorId = setInterval(() => {
         updateActivityBtnStyle(activityBtn);
-    }, 30_000); // every 30s
+    }, 30_000);
 }
 
 
