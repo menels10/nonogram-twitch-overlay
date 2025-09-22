@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.35
+// @version      4.36
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -22,7 +22,8 @@
         statusEnabled:       false,
         fineTuningEnabled:   false,
         sharpeningEnabled:   false,
-        autosendEnabled:     false
+        autosendEnabled:     false,
+        guardExport:         false
     };
     if (typeof uiConfig.sharpeningEnabled !== 'boolean') {
         uiConfig.sharpeningEnabled = false;
@@ -39,6 +40,7 @@
     let statusEnabled        = uiConfig.statusEnabled;
     let fineTuningEnabled    = uiConfig.fineTuningEnabled;
     let sharpeningEnabled = uiConfig.sharpeningEnabled;
+    let guard_Export = uiConfig.guardExport;
     let roiCanvas = document.createElement('canvas');
     let roiCtx = roiCanvas.getContext('2d');
     const DEFAULT_CONF = { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 };
@@ -75,7 +77,6 @@
     let colDashes = [];   // array per col -> [posWithinTopClueArea,...]
     // ---- Redemption Tracking ----
     let redeemBtn;
-    let guard_Export = true; // toggleable in config panel
     let lastGuardRedeem = 0; // timestamp of last auto-redeem from guard
 
     const REDEEM_KEY = "lastRedeemTimestamp";
@@ -200,19 +201,15 @@ function stopRedeemButtonMonitor() {
     redeemButtonMonitorId = null;
   }
 }
-// ---- Export Hook ----
 async function guardedExport(fn, ...args) {
     if (!guard_Export) {
-        // Guarding disabled → always run directly
         return fn(...args);
     }
 
     const minutes = minutesSinceRedeem();
     const now = Date.now();
 
-    // require coupon to be older than 55 minutes
     if (minutes > 55) {
-        // short anti-spam lock: block repeat attempts in <1 min
         if (now - lastGuardRedeem < 60_000) {
             console.log("[Reward Redeemer] Guarded export skipped — redeem already attempted recently.");
             return;
@@ -220,11 +217,9 @@ async function guardedExport(fn, ...args) {
 
         console.log("[Reward Redeemer] Guarded export requires redeem...");
         lastGuardRedeem = now;
-
-        await redeemAndTrack();  // this will call setLastRedeem() internally
+        await redeemAndTrack();
     }
 
-    // Always perform the export after redeem check
     return fn(...args);
 }
     // ─── STATUS BAR REGIONS (for 1920×1080) ──────────────────────────────────────
@@ -1796,7 +1791,7 @@ function createMainButtons() {
         });
         const autosendLabel = document.createElement('label');
         autosendLabel.htmlFor = 'chk-autosend';
-        autosendLabel.textContent = 'Auto-send chat cmd';
+        autosendLabel.textContent = 'Auto-send chat commands';
         autosendDiv.appendChild(autosendChk);
         autosendDiv.appendChild(autosendLabel);
 
@@ -1848,17 +1843,19 @@ function createMainButtons() {
         const guardChk = document.createElement('input');
         guardChk.type = 'checkbox';
         guardChk.id = 'chk-guard';
-        guardChk.checked = guard_Export; // requires: let guard_Export = uiConfig.guard_Export ?? true;
-        guardChk.style.marginRight = '6px';
+        guardChk.checked = guard_Export;  // load from config
+
         guardChk.addEventListener('change', () => {
-            guard_Export = guardChk.checked;
-            uiConfig.guard_Export = guard_Export;
-            saveUIConfig();
+            guard_Export = guardChk.checked;       // update variable
+            uiConfig.guardExport = guard_Export;   // sync to config
+            localStorage.setItem('nonogramUIConfig', JSON.stringify(uiConfig)); // persist
+            console.log("[Reward Redeemer] Guard export set to", guard_Export);
         });
 
         const guardLabel = document.createElement('label');
         guardLabel.htmlFor = 'chk-guard';
-        guardLabel.textContent = 'Guard exports (redeem check)';
+        guardLabel.textContent = 'Coupon automatic redemption before sending commands';
+
         guardDiv.appendChild(guardChk);
         guardDiv.appendChild(guardLabel);
 
@@ -1869,7 +1866,7 @@ function createMainButtons() {
         panel.appendChild(minDiv);
         panel.appendChild(blueDiv);
         panel.appendChild(statusDivToggle);
-        
+
         panel.appendChild(fineDiv);
         panel.appendChild(sharpenDiv);
 
