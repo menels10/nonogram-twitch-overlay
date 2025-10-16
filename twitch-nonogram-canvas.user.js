@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.36
+// @version      4.37
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -1331,7 +1331,8 @@ canvas.addEventListener('mousedown', onCanvasMouseDown);
             e.preventDefault();
         });
     }
-function createMainButtons() {
+
+    function createMainButtons() {
   // clear monitor before setting new one
   if (activityBtnMonitorId) {
     clearInterval(activityBtnMonitorId);
@@ -1854,7 +1855,7 @@ function createMainButtons() {
 
         const guardLabel = document.createElement('label');
         guardLabel.htmlFor = 'chk-guard';
-        guardLabel.textContent = 'Coupon automatic redemption before sending commands';
+        guardLabel.textContent = 'Coupon auto-redeem before sending commands';
 
         guardDiv.appendChild(guardChk);
         guardDiv.appendChild(guardLabel);
@@ -1928,45 +1929,67 @@ function createMainButtons() {
     //
     // ─── STATUS CONTAINER (three small canvases below control‐panel) ─────────────
     //
-    function createStatusContainer() {
-        if (document.getElementById('status-container')) return;
-        const controlContainer = document.getElementById('control-container');
-        if (!controlContainer) return;
+function createStatusContainer() {
+    if (document.getElementById('status-container')) return;
+    const controlContainer = document.getElementById('control-container');
+    if (!controlContainer) return;
 
-        const scCont = document.createElement('div');
-        scCont.id = 'status-container';
-        scCont.style.cssText = `
-            display: none;
-            margin-top: 8px;
-            width: 100%;
-            text-align: center;
+    const scCont = document.createElement('div');
+    scCont.id = 'status-container';
+    scCont.style.cssText = `
+        display: none;
+        margin-top: 8px;
+        width: 100%;
+        text-align: center;
+    `;
+
+    // match original sizing logic (small preview boxes)
+    const cw = Math.max(40, controlContainer.clientWidth - 20); // keep sane min
+    const ch = Math.round((cw * 80) / 250); // original aspect
+
+    const cmds = ['!eat', '!sleep', '!play'];
+
+    statusRegions.forEach((region, idx) => {
+        const sc = document.createElement('canvas');
+        sc.id = `status-canvas-${idx}`;
+
+        // intrinsic drawing size (important!)
+        sc.width = cw;
+        sc.height = ch;
+
+        // match CSS display size to intrinsic size to avoid stretching
+        sc.style.cssText = `
+            display: inline-block;
+            margin: 4px;
+            width: ${cw}px;
+            height: ${ch}px;
+            border: 1px solid #333;
+            background: black;
+            cursor: pointer;
+            box-sizing: content-box;
         `;
 
-        const cw = controlContainer.clientWidth - 20;
-        const ch = Math.round((cw * 80) / 250);
+        const sctx = sc.getContext('2d');
 
-        statusRegions.forEach((region, idx) => {
-            const sc = document.createElement('canvas');
-            sc.id = `status-canvas-${idx}`;
-            sc.width = cw;
-            sc.height = ch;
-            sc.style.cssText = `
-                display: block;
-                margin: 4px auto;
-                width: ${cw}px;
-                height: ${ch}px;
-                border: 1px solid #333;
-                background: black;
-            `;
-            scCont.appendChild(sc);
-
-            const sctx = sc.getContext('2d');
-            statusCanvases.push({ canvas: sc, ctx: sctx, region });
+        // sensible click handler that uses your existing chat sender
+        sc.addEventListener('click', (ev) => {
+            const cmd = cmds[idx] || '';
+            if (!cmd) return;
+            console.log(`[StatusCanvas] clicked index=${idx}, sending ${cmd}`);
+            try {
+                send_message_with_event(cmd);
+            } catch (e) {
+                console.error('Failed to send status command:', e);
+            }
         });
 
-        controlContainer.appendChild(scCont);
-        scCont.style.display = statusEnabled ? 'block' : 'none';
-    }
+        scCont.appendChild(sc);
+        statusCanvases.push({ canvas: sc, ctx: sctx, region });
+    });
+
+    controlContainer.appendChild(scCont);
+    scCont.style.display = statusEnabled ? 'block' : 'none';
+}
 
     function createControlAndStatus() {
         createControlPanel();
@@ -1976,6 +1999,7 @@ function createMainButtons() {
     window.addEventListener('load', () => {
         setupCanvas();
         initCells();
+        createStatusContainer()
         updateCanvasSize();
         createMainButtons();
         createConfigPanel();
