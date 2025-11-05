@@ -566,7 +566,7 @@ function resetClueDashes() {
         });
         if (coords.length) {
             const msg = `!fill ${coords.join(' ')}`;
-            navigator.clipboard.writeText(msg);
+            if (!autosendEnabled) navigator.clipboard.writeText(msg);
             if (autosendEnabled) scheduleSend(msg);
         }
     }
