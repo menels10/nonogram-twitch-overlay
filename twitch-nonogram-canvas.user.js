@@ -630,7 +630,7 @@ function resetClueDashes() {
         });
         if (coords.length) {
             const msg = `!empty ${coords.join(' ')}`;
-            navigator.clipboard.writeText(msg);
+            if (!autosendEnabled) navigator.clipboard.writeText(msg);
             if (autosendEnabled) scheduleSend(msg);
         }
 
