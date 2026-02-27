@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.37
+// @version      4.38
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -374,23 +374,15 @@ function waitForAnySelector(selectors, timeout = 3000) {
 }
 
 function clickFirstLayerInPanel() {
-    const rewardItems = Array.from(document.querySelectorAll('.reward-list-item, .goosYB.reward-list-item, .bitsRewardListItem--yx4rk'));
-    if (!rewardItems.length) return false;
+    // Find the image by its alt text
+    const img = document.querySelector('img[alt="'+TARGET_REWARD_NAME+'"]');
 
-    for (const item of rewardItems) {
-        const titleEl =
-            item.querySelector('div.ipRTld > p') ||
-            item.querySelector('p[title]') ||
-            item.querySelector('.CoreText-sc-1txzju1-0') ||
-            item.querySelector('p');
+    if (img) {
+        // Walk up the DOM to the nearest button ancestor
+        const button = img.closest('button');
 
-        const title = titleEl ? titleEl.innerText.trim() : item.innerText.trim();
-        if (!title) continue;
-
-        if (title.includes(TARGET_REWARD_NAME)) {
-            const btn = item.querySelector('button') || item.querySelector('button.tw-interactable');
-            if (!btn || btn.disabled) return false;
-            btn.click();
+        if (button) {
+            button.click();
             return true;
         }
     }
