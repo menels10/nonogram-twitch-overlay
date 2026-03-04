@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.38
+// @version      4.39
 // @description  Nonogram overlay + status bars + persistent config
-// @author       mrpantera+menels+a lot of chatgpt + kurotaku codes
+// @author       mrpantera+menels+86maylin+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
 // @grant        none
 // @run-at       document-start
@@ -58,6 +58,7 @@
     let isMinimized = false, renderHandle = null;
     let minimizeBtn;
     let moveHistory = [], currentAction = null;
+    let lastDartExportIndex = 1;
     // ===== Autosend cooldown/queue =====
     const COOLDOWN_MS = 10_000;
     let nextSendAt = 0;            // timestamp when next send is allowed
@@ -66,6 +67,7 @@
     let progressTimer = null;      // setInterval handle for UI progress
     let exportFillBtn = null;      // set in createMainButtons()
     let exportEmptyBtn = null;     // set in createMainButtons()
+    let exportDartBtn = null;
     // --- cleanup on unload ---
     window.addEventListener("beforeunload", () => {
         if (redeemButtonMonitorId) clearInterval(redeemButtonMonitorId);
@@ -479,6 +481,26 @@ async function attemptRedeemCycle() {
     }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
+function exportDartCommand() {
+    let msg = "!darts";
+    for (let i = 0; i < msg.length; i++) {
+        if (i == lastDartExportIndex) {
+            msg = msg.substring(0, i) + msg[i].toUpperCase() + msg.substring(i + 1);
+            lastDartExportIndex++;
+            if (lastDartExportIndex >= msg.length) {
+                lastDartExportIndex = 1;
+            }
+            break;
+        }
+    }
+    if (autosendEnabled) {
+        scheduleSend(msg);
+    }
+    else {
+        navigator.clipboard.writeText(msg);
+    }
+}
+
 // --- Column dashes (top clue area), pos is vertical offset within [0..clueH]
 function addColDash(col, pos, clueH) {
   if (col < 0 || col >= size) return;
@@ -558,8 +580,12 @@ function resetClueDashes() {
         });
         if (coords.length) {
             const msg = `!fill ${coords.join(' ')}`;
-            if (!autosendEnabled) navigator.clipboard.writeText(msg);
-            if (autosendEnabled) scheduleSend(msg);
+            if (autosendEnabled) {
+                scheduleSend(msg);
+            }
+            else {
+                navigator.clipboard.writeText(msg);
+            }
         }
     }
 
@@ -622,8 +648,12 @@ function resetClueDashes() {
         });
         if (coords.length) {
             const msg = `!empty ${coords.join(' ')}`;
-            if (!autosendEnabled) navigator.clipboard.writeText(msg);
-            if (autosendEnabled) scheduleSend(msg);
+            if (autosendEnabled) {
+                scheduleSend(msg);
+            }
+            else {
+                navigator.clipboard.writeText(msg);
+            }
         }
 
     }
@@ -761,7 +791,7 @@ function updateCooldownUI() {
   const p = cooldownProgress01();
   // Disable while cooling down or while a queue exists
     const ready = (Date.now() >= nextSendAt) && (sendQueue.length === 0);
-    [exportFillBtn, exportEmptyBtn].forEach(btn => {
+    [exportFillBtn, exportEmptyBtn, exportDartBtn].forEach(btn => {
         if (!btn) return;
         btn.disabled = !ready;
         btn.style.opacity = ready ? '1' : '0.7';
@@ -1582,6 +1612,28 @@ canvas.addEventListener('mousedown', onCanvasMouseDown);
                     lbl.textContent = `${s.label}: ${s.get()}`;
                 });
                 row.appendChild(resetBtn);
+            }
+
+            if (s.key === 'cols') {
+                const spacer = document.createElement('div');
+                spacer.style.flex = '1';
+                row.appendChild(spacer);
+
+                exportDartBtn = document.createElement('button');
+                exportDartBtn.textContent = '🎯';
+                Object.assign(exportDartBtn.style, {
+                    width: '28px',
+                    height: '28px',
+                    border: '1px solid #D6B1AA',
+                    borderRadius: '4px',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    backgroundColor: '#FFFFFF',
+                    color: 'white',
+                    textAlign: 'center'
+                });
+                exportDartBtn.addEventListener('click', exportDartCommand);
+                row.appendChild(exportDartBtn);
             }
 
             sec.appendChild(row);
