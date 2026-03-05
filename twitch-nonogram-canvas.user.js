@@ -68,6 +68,7 @@
     let exportFillBtn = null;      // set in createMainButtons()
     let exportEmptyBtn = null;     // set in createMainButtons()
     let exportDartBtn = null;
+    let statusAltCmd = false;
     // --- cleanup on unload ---
     window.addEventListener("beforeunload", () => {
         if (redeemButtonMonitorId) clearInterval(redeemButtonMonitorId);
@@ -2017,11 +2018,13 @@ function createStatusContainer() {
 
         // sensible click handler that uses your existing chat sender
         sc.addEventListener('click', (ev) => {
-            const cmd = cmds[idx] || '';
+            let cmd = cmds[idx] || '';
             if (!cmd) return;
+            if (statusAltCmd) cmd = cmd + 's';
             console.log(`[StatusCanvas] clicked index=${idx}, sending ${cmd}`);
             try {
                 send_message_with_event(cmd);
+                statusAltCmd = !statusAltCmd;
             } catch (e) {
                 console.error('Failed to send status command:', e);
             }
