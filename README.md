@@ -47,4 +47,4 @@ Reset button to default layout (4x4 with 1 clue)
 📋 Export not working? Ensure browser permissions allow clipboard access
 
 
-Special thanks for mr_pantera666 for ideas and coding and for kurotaku for making his own code available (https://github.com/Kurotaku-sama/Userscripts/) 
+Special thanks for mr_pantera666 for ideas and coding, 86 maylin for the several pulls and for kurotaku for making his own code available (https://github.com/Kurotaku-sama/Userscripts/) 
