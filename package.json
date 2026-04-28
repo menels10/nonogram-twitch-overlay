@@ -1,0 +1,12 @@
+{
+  "name": "nonogram-twitch-overlay",
+  "private": true,
+  "scripts": {
+    "build": "rollup -c",
+    "build:watch": "rollup -c -w"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "rollup": "^4.52.5"
+  }
+}
