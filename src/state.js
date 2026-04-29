@@ -1,6 +1,5 @@
 // Holds shared runtime state, persistent config, and layout constants used across modules.
-export const state = {
-  uiConfig: JSON.parse(localStorage.getItem('nonogramUIConfig')) || {
+const DEFAULT_UI_CONFIG = {
     showMinimizeButtons: false,
     useBlueFill: false,
     statusEnabled: false,
@@ -8,8 +7,11 @@ export const state = {
     sharpeningEnabled: false,
     autosendEnabled: false,
     guardExport: false
-  },
-  roiCanvas: document.createElement('canvas'),
+  };
+
+export const state = {
+  uiConfig: { ...DEFAULT_UI_CONFIG },
+  roiCanvas: null,
   roiCtx: null,
   DEFAULT_CONF: { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 },
   size: 4,
@@ -22,7 +24,7 @@ export const state = {
   fineTune: 0,
   roiWidthPercent: 0.36,
   roiHeightPercent: 0.584,
-  configs: JSON.parse(localStorage.getItem('nonogramConfigMap')) || {},
+  configs: {},
   autosendEnabled: false,
   canvas: null,
   ctx: null,
@@ -73,22 +75,29 @@ export const state = {
   documentMouseUpHandler: null
 };
 
-if (typeof state.uiConfig.sharpeningEnabled !== 'boolean') {
-  state.uiConfig.sharpeningEnabled = false;
-}
+export function initState() {
+  const storedUIConfig = JSON.parse(localStorage.getItem('nonogramUIConfig') || 'null') || {};
+  state.uiConfig = { ...DEFAULT_UI_CONFIG, ...storedUIConfig };
 
-state.roiCtx = state.roiCanvas.getContext('2d');
-state.anchorX = state.DEFAULT_CONF.anchorX;
-state.anchorY = state.DEFAULT_CONF.anchorY;
-state.zoomFactor = state.DEFAULT_CONF.zoomFactor;
-state.fineTune = state.DEFAULT_CONF.fineTune;
-state.showMinimizeButtons = state.uiConfig.showMinimizeButtons;
-state.useBlueFill = state.uiConfig.useBlueFill;
-state.statusEnabled = state.uiConfig.statusEnabled;
-state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
-state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
-state.guard_Export = state.uiConfig.guardExport;
-state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+  if (typeof state.uiConfig.sharpeningEnabled !== 'boolean') {
+    state.uiConfig.sharpeningEnabled = false;
+  }
+
+  state.configs = JSON.parse(localStorage.getItem('nonogramConfigMap') || 'null') || {};
+  state.roiCanvas = document.createElement('canvas');
+  state.roiCtx = state.roiCanvas.getContext('2d');
+  state.anchorX = state.DEFAULT_CONF.anchorX;
+  state.anchorY = state.DEFAULT_CONF.anchorY;
+  state.zoomFactor = state.DEFAULT_CONF.zoomFactor;
+  state.fineTune = state.DEFAULT_CONF.fineTune;
+  state.showMinimizeButtons = state.uiConfig.showMinimizeButtons;
+  state.useBlueFill = state.uiConfig.useBlueFill;
+  state.statusEnabled = state.uiConfig.statusEnabled;
+  state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
+  state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
+  state.guard_Export = state.uiConfig.guardExport;
+  state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+}
 
 export function saveUIConfig() {
   localStorage.setItem('nonogramUIConfig', JSON.stringify(state.uiConfig));
