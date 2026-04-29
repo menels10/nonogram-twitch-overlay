@@ -48,6 +48,28 @@ export async function redeemAndTrack(onUpdateActivityButton) {
   }
 }
 
+export function scheduleAutoRedeem() {
+  if (state.autoRedeemTimer) {
+    clearTimeout(state.autoRedeemTimer);
+    state.autoRedeemTimer = null;
+  }
+
+  const delay = (40 + Math.random() * 15) * 60000;
+  console.log(`[Reward Redeemer] Next auto redeem in ${(delay / 60000).toFixed(1)} min`);
+
+  state.autoRedeemTimer = setTimeout(async () => {
+    await redeemAndTrack();
+    scheduleAutoRedeem();
+  }, delay);
+}
+
+export function cancelAutoRedeem() {
+  if (state.autoRedeemTimer) {
+    clearTimeout(state.autoRedeemTimer);
+    state.autoRedeemTimer = null;
+  }
+}
+
 export async function guardedExport(fn, ...args) {
   if (!state.guardExport) {
     return fn(...args);

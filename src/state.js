@@ -28,6 +28,7 @@ export const state = {
   canvas: null,
   ctx: null,
   frame: null,
+  buttonContainer: null,
   isDragging: false,
   dragOffsetX: 0,
   dragOffsetY: 0,
@@ -40,6 +41,7 @@ export const state = {
   markValue: 0,
   eraseMode: false,
   isMinimized: false,
+  isPaused: false,
   renderHandle: null,
   minimizeBtn: null,
   moveHistory: [],
@@ -66,6 +68,7 @@ export const state = {
   labelMap: {},
   controlSections: [],
   roiInterval: null,
+  autoRedeemTimer: null,
   documentMouseMoveHandler: null,
   documentMouseUpHandler: null
 };

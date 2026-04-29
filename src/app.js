@@ -4,6 +4,7 @@ import { createMainButtons, render, setupCanvas, updateCanvasSize, minimizeCanva
 import { createControlAndStatus, createExtraConfigPanel, configureStatusControls } from './status-controls.js';
 import { state, clearRenderHandle, initState } from './state.js';
 import { ensureProgressLoop } from './twitch-chat.js';
+import { cancelAutoRedeem } from './twitch-redeem.js';
 
 const readyCallbacks = [];
 const shutdownCallbacks = [];
@@ -26,6 +27,7 @@ function cleanup() {
   if (state.progressTimer) clearInterval(state.progressTimer);
   if (state.sendLoopTimer) clearInterval(state.sendLoopTimer);
   if (state.roiInterval) clearInterval(state.roiInterval);
+  cancelAutoRedeem();
   clearRenderHandle();
 
   if (state.documentMouseMoveHandler) {
@@ -39,6 +41,7 @@ function cleanup() {
   state.progressTimer = null;
   state.sendLoopTimer = null;
   state.roiInterval = null;
+  state.buttonContainer = null;
   state.documentMouseMoveHandler = null;
   state.documentMouseUpHandler = null;
 }

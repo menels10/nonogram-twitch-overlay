@@ -42,6 +42,7 @@
     canvas: null,
     ctx: null,
     frame: null,
+    buttonContainer: null,
     isDragging: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
@@ -54,6 +55,7 @@
     markValue: 0,
     eraseMode: false,
     isMinimized: false,
+    isPaused: false,
     renderHandle: null,
     minimizeBtn: null,
     moveHistory: [],
@@ -80,6 +82,7 @@
     labelMap: {},
     controlSections: [],
     roiInterval: null,
+    autoRedeemTimer: null,
     documentMouseMoveHandler: null,
     documentMouseUpHandler: null
   };
@@ -1598,7 +1601,7 @@
 
   function updateROI() {
     const video = getVideoElement();
-    if (!video) return;
+    if (!video || state.isPaused) return;
 
     state.roiCtx.clearRect(0, 0, state.roiCanvas.width, state.roiCanvas.height);
 
@@ -1819,6 +1822,7 @@
     border-top: 1px solid #333;
   `;
     state.frame.appendChild(container);
+    state.buttonContainer = container;
 
     const makeBtn = (label, onClick) => {
       const btn = document.createElement('button');
@@ -1954,6 +1958,7 @@
     state.progressTimer = null;
     state.sendLoopTimer = null;
     state.roiInterval = null;
+    state.buttonContainer = null;
     state.documentMouseMoveHandler = null;
     state.documentMouseUpHandler = null;
   }

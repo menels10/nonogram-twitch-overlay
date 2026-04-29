@@ -32,7 +32,7 @@ function createMinimizeButton(onClick) {
   return button;
 }
 
-function getVideoElement() {
+export function getVideoElement() {
   if (state.videoEl?.isConnected && state.videoEl.readyState >= 2) {
     return state.videoEl;
   }
@@ -99,7 +99,7 @@ export function sharpen(ctx, w, h, mix) {
 
 export function updateROI() {
   const video = getVideoElement();
-  if (!video) return;
+  if (!video || state.isPaused) return;
 
   state.roiCtx.clearRect(0, 0, state.roiCanvas.width, state.roiCanvas.height);
 
@@ -320,6 +320,7 @@ export function createMainButtons() {
     border-top: 1px solid #333;
   `;
   state.frame.appendChild(container);
+  state.buttonContainer = container;
 
   const makeBtn = (label, onClick) => {
     const btn = document.createElement('button');
