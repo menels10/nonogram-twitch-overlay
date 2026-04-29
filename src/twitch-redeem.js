@@ -40,7 +40,6 @@ export async function redeemAndTrack(onUpdateActivityButton) {
           onUpdateActivityButton();
         } catch {}
       }
-      scheduleAutoRedeem(onUpdateActivityButton);
     } else {
       console.log('[Reward Redeemer] Redeem attempt did not complete (timed out or no button).');
     }
@@ -49,24 +48,8 @@ export async function redeemAndTrack(onUpdateActivityButton) {
   }
 }
 
-export function scheduleAutoRedeem(onUpdateActivityButton) {
-  if (!state.autoRedeemEnabled) return;
-  if (state.autoRedeemTimer) {
-    clearTimeout(state.autoRedeemTimer);
-    state.autoRedeemTimer = null;
-  }
-
-  const delay = (40 + Math.random() * 15) * 60000;
-  console.log(`[Reward Redeemer] Next auto redeem in ${(delay / 60000).toFixed(1)} min`);
-
-  state.autoRedeemTimer = setTimeout(async () => {
-    await redeemAndTrack(onUpdateActivityButton);
-    scheduleAutoRedeem(onUpdateActivityButton);
-  }, delay);
-}
-
 export async function guardedExport(fn, ...args) {
-  if (!state.guard_Export) {
+  if (!state.guardExport) {
     return fn(...args);
   }
 
@@ -155,25 +138,19 @@ function pollAndClickConfirm() {
 }
 
 export async function attemptRedeemCycle() {
-  if (state.busy) return false;
-  state.busy = true;
-  try {
-    const opened = openPanel();
-    if (!opened) return false;
+  const opened = openPanel();
+  if (!opened) return false;
 
-    const rewardPanel = await waitForAnySelector(
-      ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
-      PANEL_WAIT_TIMEOUT
-    );
-    if (!rewardPanel) return false;
+  const rewardPanel = await waitForAnySelector(
+    ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
+    PANEL_WAIT_TIMEOUT
+  );
+  if (!rewardPanel) return false;
 
-    const firstClicked = clickFirstLayerInPanel();
-    if (!firstClicked) return false;
+  const firstClicked = clickFirstLayerInPanel();
+  if (!firstClicked) return false;
 
-    await new Promise(resolve => setTimeout(resolve, 400));
-    const confirmed = await pollAndClickConfirm();
-    return !!confirmed;
-  } finally {
-    state.busy = false;
-  }
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const confirmed = await pollAndClickConfirm();
+  return !!confirmed;
 }

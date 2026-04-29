@@ -1,40 +1,40 @@
 // Integrates with Twitch chat, including message sending and autosend cooldown handling.
 import { state } from './state.js';
 
-export function send_message_with_event(message) {
-  if (!state.current_chat || !state.current_chat.props?.onSendMessage) {
-    state.current_chat = get_current_chat();
+export function sendMessageWithEvent(message) {
+  if (!state.currentChat || !state.currentChat.props?.onSendMessage) {
+    state.currentChat = getCurrentChat();
   }
 
-  if (state.current_chat?.props?.onSendMessage) {
-    state.current_chat.props.onSendMessage(message);
+  if (state.currentChat?.props?.onSendMessage) {
+    state.currentChat.props.onSendMessage(message);
   } else {
     console.error('Chat not available or missing onSendMessage. (Are you on a chat page and logged in?)');
   }
 }
 
-export function get_current_chat() {
+export function getCurrentChat() {
   try {
-    const chat_node = document.querySelector('section[data-test-selector="chat-room-component-layout"]');
-    if (!chat_node) return null;
+    const chatNode = document.querySelector('section[data-test-selector="chat-room-component-layout"]');
+    if (!chatNode) return null;
 
-    const react_instance = get_react_instance(chat_node);
-    if (!react_instance) return null;
+    const reactInstance = getReactInstance(chatNode);
+    if (!reactInstance) return null;
 
-    const chat_component = search_react_parents(
-      react_instance,
+    const chatComponent = searchReactParents(
+      reactInstance,
       node => node.stateNode && node.stateNode.props && node.stateNode.props.onSendMessage
     );
 
-    return chat_component ? chat_component.stateNode : null;
+    return chatComponent ? chatComponent.stateNode : null;
   } catch (e) {
     console.error('Error accessing chat:', e);
     return null;
   }
 }
 
-function get_react_instance(el) {
-  for (const k in el) {
+function getReactInstance(el) {
+  for (const k of Object.keys(el)) {
     if (k.startsWith('__reactInternalInstance$') || k.startsWith('__reactFiber$')) {
       return el[k];
     }
@@ -42,12 +42,12 @@ function get_react_instance(el) {
   return null;
 }
 
-function search_react_parents(node, predicate, max_depth = 15, depth = 0) {
-  if (!node || depth > max_depth) return null;
+function searchReactParents(node, predicate, maxDepth = 15, depth = 0) {
+  if (!node || depth > maxDepth) return null;
   try {
     if (predicate(node)) return node;
   } catch {}
-  return search_react_parents(node.return, predicate, max_depth, depth + 1);
+  return searchReactParents(node.return, predicate, maxDepth, depth + 1);
 }
 
 export function scheduleSend(msg) {
@@ -63,7 +63,7 @@ export function ensureSendLoop() {
     if (state.sendQueue.length > 0 && now >= state.nextSendAt) {
       const next = state.sendQueue.shift();
       try {
-        send_message_with_event(next);
+        sendMessageWithEvent(next);
       } catch (e) {
         console.error(e);
       }
@@ -93,14 +93,14 @@ export function stopProgressLoop() {
 function cooldownProgress01() {
   const now = Date.now();
   if (now < state.nextSendAt) return 1 - (state.nextSendAt - now) / state.COOLDOWN_MS;
-  if (state.sendQueue.length > 0) return 1;
   return 1;
 }
 
 export function updateCooldownUI() {
   if (!state.autosendEnabled || (!state.exportFillBtn && !state.exportEmptyBtn)) return;
+  const now = Date.now();
   const p = cooldownProgress01();
-  const ready = Date.now() >= state.nextSendAt && state.sendQueue.length === 0;
+  const ready = now >= state.nextSendAt && state.sendQueue.length === 0;
   [state.exportFillBtn, state.exportEmptyBtn, state.exportDartBtn].forEach(btn => {
     if (!btn) return;
     btn.disabled = !ready;
@@ -110,13 +110,13 @@ export function updateCooldownUI() {
   setBtnProgress(state.exportFillBtn, p);
   setBtnProgress(state.exportEmptyBtn, p);
 
-  const remain = Math.max(0, state.nextSendAt - Date.now());
+  const remain = Math.max(0, state.nextSendAt - now);
   const seconds = Math.ceil(remain / 1000);
   const title = remain > 0 ? `Cooldown: ${seconds}s` : (state.sendQueue.length ? `Queued: ${state.sendQueue.length}` : 'Ready');
   if (state.exportFillBtn) state.exportFillBtn.title = title;
   if (state.exportEmptyBtn) state.exportEmptyBtn.title = title;
 
-  if (!state.autosendEnabled || (state.sendQueue.length === 0 && Date.now() >= state.nextSendAt)) {
+  if (!state.autosendEnabled || (state.sendQueue.length === 0 && now >= state.nextSendAt)) {
     stopProgressLoop();
   }
 }

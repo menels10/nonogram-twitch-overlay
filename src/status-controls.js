@@ -1,5 +1,5 @@
 // Builds the side controls, extra settings panel, and clickable status preview canvases.
-import { saveLayout, saveUIConfig, state, statusRegions } from './state.js';
+import { saveUIConfig, state, statusRegions } from './state.js';
 import {
   decrementCols,
   decrementFineTune,
@@ -8,10 +8,56 @@ import {
   incrementCols,
   incrementFineTune,
   incrementSize,
-  initCells,
   resetSizeDefaults
 } from './nonogram-grid.js';
-import { ensureProgressLoop, ensureSendLoop, send_message_with_event, stopProgressLoop } from './twitch-chat.js';
+import { ensureProgressLoop, ensureSendLoop, sendMessageWithEvent, stopProgressLoop } from './twitch-chat.js';
+
+const MINIMIZE_BUTTON_STYLE = {
+  position: 'absolute',
+  top: '4px',
+  left: '4px',
+  width: '24px',
+  height: '24px',
+  fontWeight: 'bold',
+  fontSize: '16px',
+  lineHeight: '22px',
+  textAlign: 'center',
+  zIndex: 10002,
+  background: '#f0f0f0',
+  border: '1px solid #444',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  padding: '0',
+  color: 'black'
+};
+
+function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px' }) {
+  const wrapper = document.createElement('div');
+  wrapper.style.marginTop = marginTop;
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = id;
+  checkbox.checked = checked;
+  checkbox.style.marginRight = '6px';
+  checkbox.addEventListener('change', () => onChange(checkbox.checked));
+
+  const labelElement = document.createElement('label');
+  labelElement.htmlFor = id;
+  labelElement.textContent = label;
+
+  wrapper.appendChild(checkbox);
+  wrapper.appendChild(labelElement);
+  return { wrapper, checkbox };
+}
+
+function createMinimizeButton(onClick) {
+  const button = document.createElement('button');
+  button.textContent = 'X';
+  Object.assign(button.style, MINIMIZE_BUTTON_STYLE);
+  button.onclick = onClick;
+  return button;
+}
 
 let updateCanvasSizeRef;
 let createGridRef;
@@ -220,176 +266,109 @@ export function createExtraConfigPanel() {
     width: 200px;
   `;
 
-  const minDiv = document.createElement('div');
-  const minChk = document.createElement('input');
-  minChk.type = 'checkbox';
-  minChk.id = 'chk-minimize';
-  minChk.checked = state.showMinimizeButtons;
-  minChk.style.marginRight = '6px';
-  minChk.addEventListener('change', () => {
-    state.showMinimizeButtons = minChk.checked;
-    state.uiConfig.showMinimizeButtons = state.showMinimizeButtons;
-    saveUIConfig();
-    if (state.showMinimizeButtons) {
-      if (!state.minimizeBtn && !state.isMinimized) {
-        state.minimizeBtn = document.createElement('button');
-        state.minimizeBtn.textContent = 'X';
-        Object.assign(state.minimizeBtn.style, {
-          position: 'absolute',
-          top: '4px',
-          left: '4px',
-          width: '24px',
-          height: '24px',
-          fontWeight: 'bold',
-          fontSize: '16px',
-          lineHeight: '22px',
-          textAlign: 'center',
-          zIndex: 10002,
-          background: '#f0f0f0',
-          border: '1px solid #444',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          padding: '0',
-          color: 'black'
-        });
-        state.minimizeBtn.onclick = minimizeCanvasRef;
-        state.frame.appendChild(state.minimizeBtn);
+  const { wrapper: minDiv } = createCheckboxOption({
+    id: 'chk-minimize',
+    checked: state.showMinimizeButtons,
+    label: 'Enable minimize/restore',
+    marginTop: '0',
+    onChange: checked => {
+      state.showMinimizeButtons = checked;
+      state.uiConfig.showMinimizeButtons = state.showMinimizeButtons;
+      saveUIConfig();
+      if (state.showMinimizeButtons) {
+        if (!state.minimizeBtn && !state.isMinimized) {
+          state.minimizeBtn = createMinimizeButton(minimizeCanvasRef);
+          state.frame.appendChild(state.minimizeBtn);
+        }
+      } else {
+        if (state.minimizeBtn && state.minimizeBtn.parentElement) {
+          state.minimizeBtn.remove();
+          state.minimizeBtn = null;
+        }
+        const restoreBtn = document.getElementById('restore-button');
+        if (restoreBtn) restoreBtn.style.display = 'none';
       }
-    } else {
-      if (state.minimizeBtn && state.minimizeBtn.parentElement) {
-        state.minimizeBtn.remove();
-        state.minimizeBtn = null;
+    }
+  });
+
+  const { wrapper: blueDiv } = createCheckboxOption({
+    id: 'chk-bluefill',
+    checked: state.useBlueFill,
+    label: 'Use blue fill color',
+    onChange: checked => {
+      state.useBlueFill = checked;
+      state.uiConfig.useBlueFill = state.useBlueFill;
+      saveUIConfig();
+      createGridRef();
+    }
+  });
+
+  const { wrapper: statusDivToggle } = createCheckboxOption({
+    id: 'chk-status',
+    checked: state.statusEnabled,
+    label: 'Status canvas',
+    onChange: checked => {
+      state.statusEnabled = checked;
+      state.uiConfig.statusEnabled = state.statusEnabled;
+      saveUIConfig();
+      const scCont = document.getElementById('status-container');
+      if (scCont) scCont.style.display = state.statusEnabled ? 'block' : 'none';
+    }
+  });
+
+  const { wrapper: autosendDiv } = createCheckboxOption({
+    id: 'chk-autosend',
+    checked: state.autosendEnabled,
+    label: 'Auto-send chat commands',
+    onChange: checked => {
+      state.autosendEnabled = checked;
+      state.uiConfig.autosendEnabled = state.autosendEnabled;
+      saveUIConfig();
+      if (state.autosendEnabled) {
+        ensureSendLoop();
+        ensureProgressLoop();
+      } else {
+        stopProgressLoop();
       }
-      const restoreBtn = document.getElementById('restore-button');
-      if (restoreBtn) restoreBtn.style.display = 'none';
     }
   });
-  const minLabel = document.createElement('label');
-  minLabel.htmlFor = 'chk-minimize';
-  minLabel.textContent = 'Enable minimize/restore';
-  minDiv.appendChild(minChk);
-  minDiv.appendChild(minLabel);
 
-  const blueDiv = document.createElement('div');
-  blueDiv.style.marginTop = '8px';
-  const blueChk = document.createElement('input');
-  blueChk.type = 'checkbox';
-  blueChk.id = 'chk-bluefill';
-  blueChk.checked = state.useBlueFill;
-  blueChk.style.marginRight = '6px';
-  blueChk.addEventListener('change', () => {
-    state.useBlueFill = blueChk.checked;
-    state.uiConfig.useBlueFill = state.useBlueFill;
-    saveUIConfig();
-    createGridRef();
-  });
-  const blueLabel = document.createElement('label');
-  blueLabel.htmlFor = 'chk-bluefill';
-  blueLabel.textContent = 'Use blue fill color';
-  blueDiv.appendChild(blueChk);
-  blueDiv.appendChild(blueLabel);
-
-  const statusDivToggle = document.createElement('div');
-  statusDivToggle.style.marginTop = '8px';
-  const statusChk = document.createElement('input');
-  statusChk.type = 'checkbox';
-  statusChk.id = 'chk-status';
-  statusChk.checked = state.statusEnabled;
-  statusChk.style.marginRight = '6px';
-  statusChk.addEventListener('change', () => {
-    state.statusEnabled = statusChk.checked;
-    state.uiConfig.statusEnabled = state.statusEnabled;
-    saveUIConfig();
-    const scCont = document.getElementById('status-container');
-    if (scCont) scCont.style.display = state.statusEnabled ? 'block' : 'none';
-  });
-  const statusLabel = document.createElement('label');
-  statusLabel.htmlFor = 'chk-status';
-  statusLabel.textContent = 'Status canvas';
-  statusDivToggle.appendChild(statusChk);
-  statusDivToggle.appendChild(statusLabel);
-
-  const autosendDiv = document.createElement('div');
-  autosendDiv.style.marginTop = '8px';
-  const autosendChk = document.createElement('input');
-  autosendChk.type = 'checkbox';
-  autosendChk.id = 'chk-autosend';
-  autosendChk.checked = state.autosendEnabled;
-  autosendChk.style.marginRight = '6px';
-  autosendChk.addEventListener('change', () => {
-    state.autosendEnabled = autosendChk.checked;
-    state.uiConfig.autosendEnabled = state.autosendEnabled;
-    saveUIConfig();
-    if (state.autosendEnabled) {
-      ensureSendLoop();
-      ensureProgressLoop();
-    } else {
-      stopProgressLoop();
+  const { wrapper: fineDiv } = createCheckboxOption({
+    id: 'chk-fine',
+    checked: state.fineTuningEnabled,
+    label: 'Enable fine-tune controls',
+    onChange: checked => {
+      state.fineTuningEnabled = checked;
+      state.uiConfig.fineTuningEnabled = state.fineTuningEnabled;
+      saveUIConfig();
+      const fineSection = document.getElementById('section-fine');
+      if (fineSection) {
+        fineSection.style.display = state.fineTuningEnabled ? 'block' : 'none';
+      }
     }
   });
-  const autosendLabel = document.createElement('label');
-  autosendLabel.htmlFor = 'chk-autosend';
-  autosendLabel.textContent = 'Auto-send chat commands';
-  autosendDiv.appendChild(autosendChk);
-  autosendDiv.appendChild(autosendLabel);
 
-  const fineDiv = document.createElement('div');
-  fineDiv.style.marginTop = '8px';
-  const fineChk = document.createElement('input');
-  fineChk.type = 'checkbox';
-  fineChk.id = 'chk-fine';
-  fineChk.checked = state.fineTuningEnabled;
-  fineChk.style.marginRight = '6px';
-  fineChk.addEventListener('change', () => {
-    state.fineTuningEnabled = fineChk.checked;
-    state.uiConfig.fineTuningEnabled = state.fineTuningEnabled;
-    saveUIConfig();
-    const fineSection = document.getElementById('section-fine');
-    if (fineSection) {
-      fineSection.style.display = state.fineTuningEnabled ? 'block' : 'none';
+  const { wrapper: sharpenDiv } = createCheckboxOption({
+    id: 'chk-sharpen',
+    checked: state.sharpeningEnabled,
+    label: 'Enable sharpen filter',
+    onChange: checked => {
+      state.sharpeningEnabled = checked;
+      state.uiConfig.sharpeningEnabled = state.sharpeningEnabled;
+      saveUIConfig();
     }
   });
-  const fineLabel = document.createElement('label');
-  fineLabel.htmlFor = 'chk-fine';
-  fineLabel.textContent = 'Enable fine-tune controls';
-  fineDiv.appendChild(fineChk);
-  fineDiv.appendChild(fineLabel);
 
-  const sharpenDiv = document.createElement('div');
-  sharpenDiv.style.marginTop = '8px';
-  const sharpenChk = document.createElement('input');
-  sharpenChk.type = 'checkbox';
-  sharpenChk.id = 'chk-sharpen';
-  sharpenChk.checked = state.sharpeningEnabled;
-  sharpenChk.style.marginRight = '6px';
-  sharpenChk.addEventListener('change', () => {
-    state.sharpeningEnabled = sharpenChk.checked;
-    state.uiConfig.sharpeningEnabled = state.sharpeningEnabled;
-    saveUIConfig();
+  const { wrapper: guardDiv } = createCheckboxOption({
+    id: 'chk-guard',
+    checked: state.guardExport,
+    label: 'Coupon auto-redeem before sending commands',
+    onChange: checked => {
+      state.guardExport = checked;
+      state.uiConfig.guardExport = state.guardExport;
+      saveUIConfig();
+    }
   });
-  const sharpenLabel = document.createElement('label');
-  sharpenLabel.htmlFor = 'chk-sharpen';
-  sharpenLabel.textContent = 'Enable sharpen filter';
-  sharpenDiv.appendChild(sharpenChk);
-  sharpenDiv.appendChild(sharpenLabel);
-
-  const guardDiv = document.createElement('div');
-  guardDiv.style.marginTop = '8px';
-  const guardChk = document.createElement('input');
-  guardChk.type = 'checkbox';
-  guardChk.id = 'chk-guard';
-  guardChk.checked = state.guard_Export;
-  guardChk.addEventListener('change', () => {
-    state.guard_Export = guardChk.checked;
-    state.uiConfig.guardExport = state.guard_Export;
-    localStorage.setItem('nonogramUIConfig', JSON.stringify(state.uiConfig));
-    console.log('[Reward Redeemer] Guard export set to', state.guard_Export);
-  });
-  const guardLabel = document.createElement('label');
-  guardLabel.htmlFor = 'chk-guard';
-  guardLabel.textContent = 'Coupon auto-redeem before sending commands';
-  guardDiv.appendChild(guardChk);
-  guardDiv.appendChild(guardLabel);
 
   panel.appendChild(autosendDiv);
   panel.appendChild(guardDiv);
@@ -406,52 +385,6 @@ export function toggleExtraConfigPanel() {
   const panel = document.getElementById('extra-config-panel');
   if (!panel) return;
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-}
-
-export function createConfigPanel() {
-  if (document.getElementById('config-panel')) return;
-  const panel = document.createElement('div');
-  panel.id = 'config-panel';
-  panel.style.cssText = `
-    position: fixed;
-    top: 60px;
-    left: 60px;
-    background: #fff;
-    padding: 12px;
-    border: 1px solid #000;
-    border-radius: 6px;
-    z-index: 10002;
-    display: none;
-    color: black;
-    font-size: 15px;
-    font-weight: bold;
-    line-height: 1.6em;
-  `;
-  panel.innerHTML = `
-    <label>Size: <input id="cfg-size" type="number" value="${state.size}" /></label><br/>
-    <label>Col Clues: <input id="cfg-cols" type="number" value="${state.colClueCount}" /></label><br/>
-    <label>Fine Tune: <input id="cfg-fine" type="number" value="${state.fineTune}" /></label><br/>
-    <label>Anchor X: <input id="cfg-anchorX" type="number" value="${state.anchorX}" /></label><br/>
-    <label>Anchor Y: <input id="cfg-anchorY" type="number" value="${state.anchorY}" /></label><br/>
-    <button id="cfg-apply">Apply</button>
-    <button id="cfg-close">Close</button>
-  `;
-  document.body.appendChild(panel);
-
-  panel.querySelector('#cfg-apply').onclick = () => {
-    state.size = +panel.querySelector('#cfg-size').value;
-    state.colClueCount = +panel.querySelector('#cfg-cols').value;
-    state.fineTune = +panel.querySelector('#cfg-fine').value;
-    state.anchorX = +panel.querySelector('#cfg-anchorX').value;
-    state.anchorY = +panel.querySelector('#cfg-anchorY').value;
-    saveLayout();
-    initCells();
-    updateCanvasSizeRef();
-  };
-
-  panel.querySelector('#cfg-close').onclick = () => {
-    panel.style.display = 'none';
-  };
 }
 
 export function createStatusContainer() {
@@ -495,9 +428,8 @@ export function createStatusContainer() {
       let cmd = cmds[idx] || '';
       if (!cmd) return;
       if (state.statusAltCmd) cmd = cmd + 's';
-      console.log(`[StatusCanvas] clicked index=${idx}, sending ${cmd}`);
       try {
-        send_message_with_event(cmd);
+        sendMessageWithEvent(cmd);
         state.statusAltCmd = !state.statusAltCmd;
       } catch (e) {
         console.error('Failed to send status command:', e);

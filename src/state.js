@@ -15,9 +15,7 @@ export const state = {
   roiCtx: null,
   DEFAULT_CONF: { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 },
   size: 4,
-  rowClueCount: 1,
   colClueCount: 1,
-  ratio: 1.0,
   anchorX: 10,
   anchorY: 10,
   zoomFactor: 1.4,
@@ -26,6 +24,7 @@ export const state = {
   roiHeightPercent: 0.584,
   configs: {},
   autosendEnabled: false,
+  videoEl: null,
   canvas: null,
   ctx: null,
   frame: null,
@@ -45,6 +44,7 @@ export const state = {
   minimizeBtn: null,
   moveHistory: [],
   currentAction: null,
+  geometryCache: null,
   lastDartExportIndex: 1,
   COOLDOWN_MS: 10_000,
   nextSendAt: 0,
@@ -57,17 +57,12 @@ export const state = {
   statusAltCmd: false,
   rowDashes: [],
   colDashes: [],
-  redeemBtn: null,
   lastGuardRedeem: 0,
   REDEEM_KEY: 'lastRedeemTimestamp',
-  redeemButtonMonitorId: null,
   activityBtnMonitorId: null,
   redeemBusy: false,
-  autoRedeemEnabled: false,
-  autoRedeemTimer: null,
-  busy: false,
   statusCanvases: [],
-  current_chat: null,
+  currentChat: null,
   labelMap: {},
   controlSections: [],
   roiInterval: null,
@@ -95,7 +90,7 @@ export function initState() {
   state.statusEnabled = state.uiConfig.statusEnabled;
   state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
   state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
-  state.guard_Export = state.uiConfig.guardExport;
+  state.guardExport = state.uiConfig.guardExport;
   state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
 }
 
@@ -218,8 +213,8 @@ export const statusRegions = [
   { sx: 800, sy: 980, sw: 250, sh: 70 }
 ];
 
-export function getKey(sz, rc, cc) {
-  return `${sz}x${rc}x${cc}`;
+export function getKey(sz, cc) {
+  return `${sz}x${cc}`;
 }
 
 export function getLayoutSettings(size, colClueLength) {
@@ -237,14 +232,12 @@ export function getLayoutSettings(size, colClueLength) {
 }
 
 export function saveLayout() {
-  const key = getKey(state.size, state.rowClueCount, state.colClueCount);
+  const key = getKey(state.size, state.colClueCount);
   state.configs[key] = {
-    ratio: state.ratio,
     anchorX: state.anchorX,
     anchorY: state.anchorY,
     fineTune: state.fineTune,
     size: state.size,
-    rowClueCount: state.rowClueCount,
     colClueCount: state.colClueCount
   };
   localStorage.setItem('nonogramConfigMap', JSON.stringify(state.configs));
@@ -256,7 +249,7 @@ export function loadLayout() {
     state.anchorX = layout.anchorX;
     state.anchorY = layout.anchorY;
   }
-  const key = getKey(state.size, state.rowClueCount, state.colClueCount);
+  const key = getKey(state.size, state.colClueCount);
   const saved = state.configs[key];
   if (saved) {
     state.fineTune = saved.fineTune ?? state.fineTune;

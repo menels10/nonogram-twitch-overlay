@@ -13,8 +13,7 @@
   'use strict';
 
   // Holds shared runtime state, persistent config, and layout constants used across modules.
-  const state = {
-    uiConfig: JSON.parse(localStorage.getItem('nonogramUIConfig')) || {
+  const DEFAULT_UI_CONFIG = {
       showMinimizeButtons: false,
       useBlueFill: false,
       statusEnabled: false,
@@ -22,22 +21,24 @@
       sharpeningEnabled: false,
       autosendEnabled: false,
       guardExport: false
-    },
-    roiCanvas: document.createElement('canvas'),
+    };
+
+  const state = {
+    uiConfig: { ...DEFAULT_UI_CONFIG },
+    roiCanvas: null,
     roiCtx: null,
     DEFAULT_CONF: { anchorX: 10, anchorY: 10, zoomFactor: 1.4, fineTune: 0 },
     size: 4,
-    rowClueCount: 1,
     colClueCount: 1,
-    ratio: 1.0,
     anchorX: 10,
     anchorY: 10,
     zoomFactor: 1.4,
     fineTune: 0,
     roiWidthPercent: 0.36,
     roiHeightPercent: 0.584,
-    configs: JSON.parse(localStorage.getItem('nonogramConfigMap')) || {},
+    configs: {},
     autosendEnabled: false,
+    videoEl: null,
     canvas: null,
     ctx: null,
     frame: null,
@@ -57,6 +58,7 @@
     minimizeBtn: null,
     moveHistory: [],
     currentAction: null,
+    geometryCache: null,
     lastDartExportIndex: 1,
     COOLDOWN_MS: 10_000,
     nextSendAt: 0,
@@ -69,17 +71,12 @@
     statusAltCmd: false,
     rowDashes: [],
     colDashes: [],
-    redeemBtn: null,
     lastGuardRedeem: 0,
     REDEEM_KEY: 'lastRedeemTimestamp',
-    redeemButtonMonitorId: null,
     activityBtnMonitorId: null,
     redeemBusy: false,
-    autoRedeemEnabled: false,
-    autoRedeemTimer: null,
-    busy: false,
     statusCanvases: [],
-    current_chat: null,
+    currentChat: null,
     labelMap: {},
     controlSections: [],
     roiInterval: null,
@@ -87,22 +84,29 @@
     documentMouseUpHandler: null
   };
 
-  if (typeof state.uiConfig.sharpeningEnabled !== 'boolean') {
-    state.uiConfig.sharpeningEnabled = false;
-  }
+  function initState() {
+    const storedUIConfig = JSON.parse(localStorage.getItem('nonogramUIConfig') || 'null') || {};
+    state.uiConfig = { ...DEFAULT_UI_CONFIG, ...storedUIConfig };
 
-  state.roiCtx = state.roiCanvas.getContext('2d');
-  state.anchorX = state.DEFAULT_CONF.anchorX;
-  state.anchorY = state.DEFAULT_CONF.anchorY;
-  state.zoomFactor = state.DEFAULT_CONF.zoomFactor;
-  state.fineTune = state.DEFAULT_CONF.fineTune;
-  state.showMinimizeButtons = state.uiConfig.showMinimizeButtons;
-  state.useBlueFill = state.uiConfig.useBlueFill;
-  state.statusEnabled = state.uiConfig.statusEnabled;
-  state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
-  state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
-  state.guard_Export = state.uiConfig.guardExport;
-  state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+    if (typeof state.uiConfig.sharpeningEnabled !== 'boolean') {
+      state.uiConfig.sharpeningEnabled = false;
+    }
+
+    state.configs = JSON.parse(localStorage.getItem('nonogramConfigMap') || 'null') || {};
+    state.roiCanvas = document.createElement('canvas');
+    state.roiCtx = state.roiCanvas.getContext('2d');
+    state.anchorX = state.DEFAULT_CONF.anchorX;
+    state.anchorY = state.DEFAULT_CONF.anchorY;
+    state.zoomFactor = state.DEFAULT_CONF.zoomFactor;
+    state.fineTune = state.DEFAULT_CONF.fineTune;
+    state.showMinimizeButtons = state.uiConfig.showMinimizeButtons;
+    state.useBlueFill = state.uiConfig.useBlueFill;
+    state.statusEnabled = state.uiConfig.statusEnabled;
+    state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
+    state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
+    state.guardExport = state.uiConfig.guardExport;
+    state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+  }
 
   function saveUIConfig() {
     localStorage.setItem('nonogramUIConfig', JSON.stringify(state.uiConfig));
@@ -223,8 +227,8 @@
     { sx: 800, sy: 980, sw: 250, sh: 70 }
   ];
 
-  function getKey(sz, rc, cc) {
-    return `${sz}x${rc}x${cc}`;
+  function getKey(sz, cc) {
+    return `${sz}x${cc}`;
   }
 
   function getLayoutSettings(size, colClueLength) {
@@ -242,14 +246,12 @@
   }
 
   function saveLayout() {
-    const key = getKey(state.size, state.rowClueCount, state.colClueCount);
+    const key = getKey(state.size, state.colClueCount);
     state.configs[key] = {
-      ratio: state.ratio,
       anchorX: state.anchorX,
       anchorY: state.anchorY,
       fineTune: state.fineTune,
       size: state.size,
-      rowClueCount: state.rowClueCount,
       colClueCount: state.colClueCount
     };
     localStorage.setItem('nonogramConfigMap', JSON.stringify(state.configs));
@@ -261,7 +263,7 @@
       state.anchorX = layout.anchorX;
       state.anchorY = layout.anchorY;
     }
-    const key = getKey(state.size, state.rowClueCount, state.colClueCount);
+    const key = getKey(state.size, state.colClueCount);
     const saved = state.configs[key];
     if (saved) {
       state.fineTune = saved.fineTune ?? state.fineTune;
@@ -280,40 +282,40 @@
 
   // Integrates with Twitch chat, including message sending and autosend cooldown handling.
 
-  function send_message_with_event(message) {
-    if (!state.current_chat || !state.current_chat.props?.onSendMessage) {
-      state.current_chat = get_current_chat();
+  function sendMessageWithEvent(message) {
+    if (!state.currentChat || !state.currentChat.props?.onSendMessage) {
+      state.currentChat = getCurrentChat();
     }
 
-    if (state.current_chat?.props?.onSendMessage) {
-      state.current_chat.props.onSendMessage(message);
+    if (state.currentChat?.props?.onSendMessage) {
+      state.currentChat.props.onSendMessage(message);
     } else {
       console.error('Chat not available or missing onSendMessage. (Are you on a chat page and logged in?)');
     }
   }
 
-  function get_current_chat() {
+  function getCurrentChat() {
     try {
-      const chat_node = document.querySelector('section[data-test-selector="chat-room-component-layout"]');
-      if (!chat_node) return null;
+      const chatNode = document.querySelector('section[data-test-selector="chat-room-component-layout"]');
+      if (!chatNode) return null;
 
-      const react_instance = get_react_instance(chat_node);
-      if (!react_instance) return null;
+      const reactInstance = getReactInstance(chatNode);
+      if (!reactInstance) return null;
 
-      const chat_component = search_react_parents(
-        react_instance,
+      const chatComponent = searchReactParents(
+        reactInstance,
         node => node.stateNode && node.stateNode.props && node.stateNode.props.onSendMessage
       );
 
-      return chat_component ? chat_component.stateNode : null;
+      return chatComponent ? chatComponent.stateNode : null;
     } catch (e) {
       console.error('Error accessing chat:', e);
       return null;
     }
   }
 
-  function get_react_instance(el) {
-    for (const k in el) {
+  function getReactInstance(el) {
+    for (const k of Object.keys(el)) {
       if (k.startsWith('__reactInternalInstance$') || k.startsWith('__reactFiber$')) {
         return el[k];
       }
@@ -321,12 +323,12 @@
     return null;
   }
 
-  function search_react_parents(node, predicate, max_depth = 15, depth = 0) {
-    if (!node || depth > max_depth) return null;
+  function searchReactParents(node, predicate, maxDepth = 15, depth = 0) {
+    if (!node || depth > maxDepth) return null;
     try {
       if (predicate(node)) return node;
     } catch {}
-    return search_react_parents(node.return, predicate, max_depth, depth + 1);
+    return searchReactParents(node.return, predicate, maxDepth, depth + 1);
   }
 
   function scheduleSend(msg) {
@@ -342,7 +344,7 @@
       if (state.sendQueue.length > 0 && now >= state.nextSendAt) {
         const next = state.sendQueue.shift();
         try {
-          send_message_with_event(next);
+          sendMessageWithEvent(next);
         } catch (e) {
           console.error(e);
         }
@@ -372,14 +374,14 @@
   function cooldownProgress01() {
     const now = Date.now();
     if (now < state.nextSendAt) return 1 - (state.nextSendAt - now) / state.COOLDOWN_MS;
-    if (state.sendQueue.length > 0) return 1;
     return 1;
   }
 
   function updateCooldownUI() {
     if (!state.autosendEnabled || (!state.exportFillBtn && !state.exportEmptyBtn)) return;
+    const now = Date.now();
     const p = cooldownProgress01();
-    const ready = Date.now() >= state.nextSendAt && state.sendQueue.length === 0;
+    const ready = now >= state.nextSendAt && state.sendQueue.length === 0;
     [state.exportFillBtn, state.exportEmptyBtn, state.exportDartBtn].forEach(btn => {
       if (!btn) return;
       btn.disabled = !ready;
@@ -389,13 +391,13 @@
     setBtnProgress(state.exportFillBtn, p);
     setBtnProgress(state.exportEmptyBtn, p);
 
-    const remain = Math.max(0, state.nextSendAt - Date.now());
+    const remain = Math.max(0, state.nextSendAt - now);
     const seconds = Math.ceil(remain / 1000);
     const title = remain > 0 ? `Cooldown: ${seconds}s` : (state.sendQueue.length ? `Queued: ${state.sendQueue.length}` : 'Ready');
     if (state.exportFillBtn) state.exportFillBtn.title = title;
     if (state.exportEmptyBtn) state.exportEmptyBtn.title = title;
 
-    if (!state.autosendEnabled || (state.sendQueue.length === 0 && Date.now() >= state.nextSendAt)) {
+    if (!state.autosendEnabled || (state.sendQueue.length === 0 && now >= state.nextSendAt)) {
       stopProgressLoop();
     }
   }
@@ -451,7 +453,6 @@
             onUpdateActivityButton();
           } catch {}
         }
-        scheduleAutoRedeem(onUpdateActivityButton);
       } else {
         console.log('[Reward Redeemer] Redeem attempt did not complete (timed out or no button).');
       }
@@ -460,12 +461,8 @@
     }
   }
 
-  function scheduleAutoRedeem(onUpdateActivityButton) {
-    return;
-  }
-
   async function guardedExport(fn, ...args) {
-    if (!state.guard_Export) {
+    if (!state.guardExport) {
       return fn(...args);
     }
 
@@ -554,41 +551,54 @@
   }
 
   async function attemptRedeemCycle() {
-    if (state.busy) return false;
-    state.busy = true;
-    try {
-      const opened = openPanel();
-      if (!opened) return false;
+    const opened = openPanel();
+    if (!opened) return false;
 
-      const rewardPanel = await waitForAnySelector(
-        ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
-        PANEL_WAIT_TIMEOUT
-      );
-      if (!rewardPanel) return false;
+    const rewardPanel = await waitForAnySelector(
+      ['#channel-points-reward-center-body', '.rewards-list', '.reward-list-item'],
+      PANEL_WAIT_TIMEOUT
+    );
+    if (!rewardPanel) return false;
 
-      const firstClicked = clickFirstLayerInPanel();
-      if (!firstClicked) return false;
+    const firstClicked = clickFirstLayerInPanel();
+    if (!firstClicked) return false;
 
-      await new Promise(resolve => setTimeout(resolve, 400));
-      const confirmed = await pollAndClickConfirm();
-      return !!confirmed;
-    } finally {
-      state.busy = false;
-    }
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const confirmed = await pollAndClickConfirm();
+    return !!confirmed;
   }
 
   // Owns nonogram state, geometry, drawing, exports, and canvas interaction logic.
 
   let updateCanvasSizeRef$1;
 
+  const COL_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+  const CELL_EMPTY = 0;
+  const CELL_FILLED = 1;
+  const CELL_MARKED = 2;
+
+  function colLetter(index) {
+    return COL_LETTERS[index];
+  }
+
+  function safeClipboardWrite(text) {
+    try {
+      navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.warn('Clipboard write failed:', error);
+      alert(text);
+    }
+  }
+
   function configureNonogramGrid({ updateCanvasSize }) {
     updateCanvasSizeRef$1 = updateCanvasSize;
   }
 
   function initCells() {
-    state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(0));
+    state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(CELL_EMPTY));
     state.lastExported = new Set();
     state.lastExportedWhite = new Set();
+    state.geometryCache = null;
     resetClueDashes();
   }
 
@@ -598,20 +608,17 @@
 
   async function exportDartCommand() {
     let msg = '!darts';
-    for (let i = 0; i < msg.length; i++) {
-      if (i === state.lastDartExportIndex) {
-        msg = msg.substring(0, i) + msg[i].toUpperCase() + msg.substring(i + 1);
-        state.lastDartExportIndex++;
-        if (state.lastDartExportIndex >= msg.length) {
-          state.lastDartExportIndex = 1;
-        }
-        break;
-      }
+    const chars = [...msg];
+    chars[state.lastDartExportIndex] = chars[state.lastDartExportIndex].toUpperCase();
+    msg = chars.join('');
+    state.lastDartExportIndex++;
+    if (state.lastDartExportIndex >= msg.length) {
+      state.lastDartExportIndex = 1;
     }
     if (state.autosendEnabled) {
       scheduleSend(msg);
     } else {
-      navigator.clipboard.writeText(msg);
+      safeClipboardWrite(msg);
     }
   }
 
@@ -658,8 +665,22 @@
   }
 
   function computeGridGeometry() {
+    const cacheKey = [
+      state.size,
+      state.colClueCount,
+      state.fineTune,
+      state.anchorX,
+      state.anchorY,
+      state.canvas?.width,
+      state.canvas?.height
+    ].join(':');
+
+    if (state.geometryCache?.key === cacheKey) {
+      return state.geometryCache.value;
+    }
+
     state.ctx.font = 'bold 30px Arial';
-    const clueW = state.ctx.measureText('0'.repeat(state.rowClueCount)).width;
+    const clueW = state.ctx.measureText('0').width;
     const clueH = 30 * state.colClueCount + 5;
 
     const layout = getLayoutSettings(state.size, state.colClueCount);
@@ -675,7 +696,9 @@
     const ox = state.canvas.width - cellSize * state.size - state.anchorX;
     const oy = state.canvas.height - cellSize * state.size - state.anchorY;
 
-    return { clueW, clueH, cellSize, ox, oy };
+    const geometry = { clueW, clueH, cellSize, ox, oy };
+    state.geometryCache = { key: cacheKey, value: geometry };
+    return geometry;
   }
 
   function resetClueDashes() {
@@ -695,23 +718,23 @@
     const coords = [];
     state.cellStates.forEach((row, r) => {
       row.forEach((s, c) => {
-        if (s === 1) {
-          const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
-          if (!state.lastExported.has(coord)) {
-            coords.push(coord);
-            state.lastExported.add(coord);
+          if (s === 1) {
+            const coord = `${colLetter(c)}${r + 1}`;
+            if (!state.lastExported.has(coord)) {
+              coords.push(coord);
+              state.lastExported.add(coord);
           }
         }
       });
     });
-    if (coords.length) {
-      const msg = `!fill ${coords.join(' ')}`;
-      if (state.autosendEnabled) {
-        scheduleSend(msg);
-      } else {
-        navigator.clipboard.writeText(msg);
+      if (coords.length) {
+        const msg = `!fill ${coords.join(' ')}`;
+        if (state.autosendEnabled) {
+          scheduleSend(msg);
+        } else {
+          safeClipboardWrite(msg);
+        }
       }
-    }
   }
 
   function exportAllCellsInner(mode) {
@@ -725,7 +748,7 @@
       state.cellStates.forEach((row, r) => {
         row.forEach((s, c) => {
           if (s === 1) {
-            const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+            const coord = `${colLetter(c)}${r + 1}`;
             coords.push(coord);
             state.lastExported.add(coord);
           }
@@ -733,14 +756,14 @@
       });
       if (coords.length) {
         const msg = `!fill ${coords.join(' ')}`;
-        navigator.clipboard.writeText(msg);
         if (state.autosendEnabled) scheduleSend(msg);
+        else safeClipboardWrite(msg);
       }
     } else if (mode === 'white') {
       state.cellStates.forEach((row, r) => {
         row.forEach((s, c) => {
-          if (s === 2) {
-            const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+          if (s === CELL_MARKED) {
+            const coord = `${colLetter(c)}${r + 1}`;
             coords.push(coord);
             state.lastExportedWhite.add(coord);
           }
@@ -748,8 +771,8 @@
       });
       if (coords.length) {
         const msg = `!empty ${coords.join(' ')}`;
-        navigator.clipboard.writeText(msg);
         if (state.autosendEnabled) scheduleSend(msg);
+        else safeClipboardWrite(msg);
       }
     }
   }
@@ -759,7 +782,7 @@
     state.cellStates.forEach((row, r) => {
       row.forEach((s, c) => {
         if (s === 2) {
-          const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+          const coord = `${colLetter(c)}${r + 1}`;
           if (!state.lastExportedWhite.has(coord)) {
             coords.push(coord);
             state.lastExportedWhite.add(coord);
@@ -772,7 +795,7 @@
       if (state.autosendEnabled) {
         scheduleSend(msg);
       } else {
-        navigator.clipboard.writeText(msg);
+        safeClipboardWrite(msg);
       }
     }
   }
@@ -790,19 +813,13 @@
   }
 
   function exportClearCommand() {
-    const letters = 'abcdefghijklmnopqrstuvwxyz';
     const ranges = [];
     for (let c = 0; c < state.size; c++) {
-      const col = letters[c];
+      const col = colLetter(c);
       ranges.push(`${col}1-${col}${state.size}`);
     }
     const clearCmd = `!clear ${ranges.join(',')}`;
-    try {
-      navigator.clipboard.writeText(clearCmd);
-    } catch (e) {
-      console.warn('Clipboard write failed:', e);
-      alert(clearCmd);
-    }
+    safeClipboardWrite(clearCmd);
   }
 
   function createGrid() {
@@ -857,21 +874,24 @@
       }
     }
 
+    const filledColor = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+    const markedColor = 'rgba(255, 255, 255, 0.6)';
+
     for (let r = 0; r < state.size; r++) {
       for (let c = 0; c < state.size; c++) {
         const x = ox + c * cellSize;
         const y = oy + r * cellSize;
 
-        if (state.cellStates[r][c] === 1) {
-          state.ctx.fillStyle = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
-        } else if (state.cellStates[r][c] === 2) {
-          state.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        if (state.cellStates[r][c] === CELL_FILLED) {
+          state.ctx.fillStyle = filledColor;
+        } else if (state.cellStates[r][c] === CELL_MARKED) {
+          state.ctx.fillStyle = markedColor;
         }
 
         state.ctx.strokeRect(x, y, cellSize, cellSize);
-        if (state.cellStates[r][c] === 1 || state.cellStates[r][c] === 2) {
+        if (state.cellStates[r][c] === CELL_FILLED || state.cellStates[r][c] === CELL_MARKED) {
           state.ctx.fillRect(x, y, cellSize, cellSize);
-          if (state.cellStates[r][c] === 2) state.ctx.fillStyle = 'black';
+          if (state.cellStates[r][c] === CELL_MARKED) state.ctx.fillStyle = 'black';
         }
       }
     }
@@ -917,11 +937,11 @@
 
     if (r >= 0 && r < state.size && c >= 0 && c < state.size) {
       state.isMarking = true;
-      state.markValue = e.button === 0 ? 1 : 2;
+      state.markValue = e.button === 0 ? CELL_FILLED : CELL_MARKED;
       state.eraseMode = state.cellStates[r][c] === state.markValue;
 
       const prevValue = state.cellStates[r][c];
-      const newValue = state.eraseMode ? 0 : state.markValue;
+      const newValue = state.eraseMode ? CELL_EMPTY : state.markValue;
       state.cellStates[r][c] = newValue;
       state.currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
       createGrid();
@@ -963,11 +983,13 @@
       newCol = c;
     }
 
+    const hoverChanged = newRow !== state.hoveredRow || newCol !== state.hoveredCol;
     state.hoveredRow = newRow;
     state.hoveredCol = newCol;
 
+    let cellChanged = false;
     if (state.isMarking && newRow >= 0 && newCol >= 0) {
-      const targetValue = state.eraseMode ? 0 : state.markValue;
+      const targetValue = state.eraseMode ? CELL_EMPTY : state.markValue;
       if (state.cellStates[newRow][newCol] !== targetValue) {
         if (!state.currentAction) state.currentAction = [];
         state.currentAction.push({
@@ -977,19 +999,22 @@
           newValue: targetValue
         });
         state.cellStates[newRow][newCol] = targetValue;
+        cellChanged = true;
       }
     }
 
-    createGrid();
+    if (hoverChanged || cellChanged) {
+      createGrid();
+    }
   }
 
   function undoLastAction() {
     if (!state.moveHistory.length) return;
     const lastAction = state.moveHistory.pop();
     lastAction.forEach(({ row, col, previous, newValue }) => {
-      const coord = `${String.fromCharCode(97 + col)}${row + 1}`;
-      if (newValue === 1) state.lastExported.delete(coord);
-      if (newValue === 2) state.lastExportedWhite.delete(coord);
+      const coord = `${colLetter(col)}${row + 1}`;
+      if (newValue === CELL_FILLED) state.lastExported.delete(coord);
+      if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
       state.cellStates[row][col] = previous;
     });
     createGrid();
@@ -1025,12 +1050,14 @@
 
   function decrementFineTune() {
     state.fineTune--;
+    state.geometryCache = null;
     saveLayout();
     updateCanvasSizeRef$1();
   }
 
   function incrementFineTune() {
     state.fineTune++;
+    state.geometryCache = null;
     saveLayout();
     updateCanvasSizeRef$1();
   }
@@ -1038,13 +1065,59 @@
   function resetSizeDefaults() {
     saveLayout();
     state.size = 4;
-    state.rowClueCount = 1;
     state.colClueCount = 1;
     initCells();
     updateCanvasSizeRef$1();
   }
 
   // Builds the side controls, extra settings panel, and clickable status preview canvases.
+
+  const MINIMIZE_BUTTON_STYLE$1 = {
+    position: 'absolute',
+    top: '4px',
+    left: '4px',
+    width: '24px',
+    height: '24px',
+    fontWeight: 'bold',
+    fontSize: '16px',
+    lineHeight: '22px',
+    textAlign: 'center',
+    zIndex: 10002,
+    background: '#f0f0f0',
+    border: '1px solid #444',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    padding: '0',
+    color: 'black'
+  };
+
+  function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px' }) {
+    const wrapper = document.createElement('div');
+    wrapper.style.marginTop = marginTop;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = id;
+    checkbox.checked = checked;
+    checkbox.style.marginRight = '6px';
+    checkbox.addEventListener('change', () => onChange(checkbox.checked));
+
+    const labelElement = document.createElement('label');
+    labelElement.htmlFor = id;
+    labelElement.textContent = label;
+
+    wrapper.appendChild(checkbox);
+    wrapper.appendChild(labelElement);
+    return { wrapper, checkbox };
+  }
+
+  function createMinimizeButton$1(onClick) {
+    const button = document.createElement('button');
+    button.textContent = 'X';
+    Object.assign(button.style, MINIMIZE_BUTTON_STYLE$1);
+    button.onclick = onClick;
+    return button;
+  }
 
   let updateCanvasSizeRef;
   let createGridRef;
@@ -1246,176 +1319,109 @@
     width: 200px;
   `;
 
-    const minDiv = document.createElement('div');
-    const minChk = document.createElement('input');
-    minChk.type = 'checkbox';
-    minChk.id = 'chk-minimize';
-    minChk.checked = state.showMinimizeButtons;
-    minChk.style.marginRight = '6px';
-    minChk.addEventListener('change', () => {
-      state.showMinimizeButtons = minChk.checked;
-      state.uiConfig.showMinimizeButtons = state.showMinimizeButtons;
-      saveUIConfig();
-      if (state.showMinimizeButtons) {
-        if (!state.minimizeBtn && !state.isMinimized) {
-          state.minimizeBtn = document.createElement('button');
-          state.minimizeBtn.textContent = 'X';
-          Object.assign(state.minimizeBtn.style, {
-            position: 'absolute',
-            top: '4px',
-            left: '4px',
-            width: '24px',
-            height: '24px',
-            fontWeight: 'bold',
-            fontSize: '16px',
-            lineHeight: '22px',
-            textAlign: 'center',
-            zIndex: 10002,
-            background: '#f0f0f0',
-            border: '1px solid #444',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            padding: '0',
-            color: 'black'
-          });
-          state.minimizeBtn.onclick = minimizeCanvasRef;
-          state.frame.appendChild(state.minimizeBtn);
+    const { wrapper: minDiv } = createCheckboxOption({
+      id: 'chk-minimize',
+      checked: state.showMinimizeButtons,
+      label: 'Enable minimize/restore',
+      marginTop: '0',
+      onChange: checked => {
+        state.showMinimizeButtons = checked;
+        state.uiConfig.showMinimizeButtons = state.showMinimizeButtons;
+        saveUIConfig();
+        if (state.showMinimizeButtons) {
+          if (!state.minimizeBtn && !state.isMinimized) {
+            state.minimizeBtn = createMinimizeButton$1(minimizeCanvasRef);
+            state.frame.appendChild(state.minimizeBtn);
+          }
+        } else {
+          if (state.minimizeBtn && state.minimizeBtn.parentElement) {
+            state.minimizeBtn.remove();
+            state.minimizeBtn = null;
+          }
+          const restoreBtn = document.getElementById('restore-button');
+          if (restoreBtn) restoreBtn.style.display = 'none';
         }
-      } else {
-        if (state.minimizeBtn && state.minimizeBtn.parentElement) {
-          state.minimizeBtn.remove();
-          state.minimizeBtn = null;
+      }
+    });
+
+    const { wrapper: blueDiv } = createCheckboxOption({
+      id: 'chk-bluefill',
+      checked: state.useBlueFill,
+      label: 'Use blue fill color',
+      onChange: checked => {
+        state.useBlueFill = checked;
+        state.uiConfig.useBlueFill = state.useBlueFill;
+        saveUIConfig();
+        createGridRef();
+      }
+    });
+
+    const { wrapper: statusDivToggle } = createCheckboxOption({
+      id: 'chk-status',
+      checked: state.statusEnabled,
+      label: 'Status canvas',
+      onChange: checked => {
+        state.statusEnabled = checked;
+        state.uiConfig.statusEnabled = state.statusEnabled;
+        saveUIConfig();
+        const scCont = document.getElementById('status-container');
+        if (scCont) scCont.style.display = state.statusEnabled ? 'block' : 'none';
+      }
+    });
+
+    const { wrapper: autosendDiv } = createCheckboxOption({
+      id: 'chk-autosend',
+      checked: state.autosendEnabled,
+      label: 'Auto-send chat commands',
+      onChange: checked => {
+        state.autosendEnabled = checked;
+        state.uiConfig.autosendEnabled = state.autosendEnabled;
+        saveUIConfig();
+        if (state.autosendEnabled) {
+          ensureSendLoop();
+          ensureProgressLoop();
+        } else {
+          stopProgressLoop();
         }
-        const restoreBtn = document.getElementById('restore-button');
-        if (restoreBtn) restoreBtn.style.display = 'none';
       }
     });
-    const minLabel = document.createElement('label');
-    minLabel.htmlFor = 'chk-minimize';
-    minLabel.textContent = 'Enable minimize/restore';
-    minDiv.appendChild(minChk);
-    minDiv.appendChild(minLabel);
 
-    const blueDiv = document.createElement('div');
-    blueDiv.style.marginTop = '8px';
-    const blueChk = document.createElement('input');
-    blueChk.type = 'checkbox';
-    blueChk.id = 'chk-bluefill';
-    blueChk.checked = state.useBlueFill;
-    blueChk.style.marginRight = '6px';
-    blueChk.addEventListener('change', () => {
-      state.useBlueFill = blueChk.checked;
-      state.uiConfig.useBlueFill = state.useBlueFill;
-      saveUIConfig();
-      createGridRef();
-    });
-    const blueLabel = document.createElement('label');
-    blueLabel.htmlFor = 'chk-bluefill';
-    blueLabel.textContent = 'Use blue fill color';
-    blueDiv.appendChild(blueChk);
-    blueDiv.appendChild(blueLabel);
-
-    const statusDivToggle = document.createElement('div');
-    statusDivToggle.style.marginTop = '8px';
-    const statusChk = document.createElement('input');
-    statusChk.type = 'checkbox';
-    statusChk.id = 'chk-status';
-    statusChk.checked = state.statusEnabled;
-    statusChk.style.marginRight = '6px';
-    statusChk.addEventListener('change', () => {
-      state.statusEnabled = statusChk.checked;
-      state.uiConfig.statusEnabled = state.statusEnabled;
-      saveUIConfig();
-      const scCont = document.getElementById('status-container');
-      if (scCont) scCont.style.display = state.statusEnabled ? 'block' : 'none';
-    });
-    const statusLabel = document.createElement('label');
-    statusLabel.htmlFor = 'chk-status';
-    statusLabel.textContent = 'Status canvas';
-    statusDivToggle.appendChild(statusChk);
-    statusDivToggle.appendChild(statusLabel);
-
-    const autosendDiv = document.createElement('div');
-    autosendDiv.style.marginTop = '8px';
-    const autosendChk = document.createElement('input');
-    autosendChk.type = 'checkbox';
-    autosendChk.id = 'chk-autosend';
-    autosendChk.checked = state.autosendEnabled;
-    autosendChk.style.marginRight = '6px';
-    autosendChk.addEventListener('change', () => {
-      state.autosendEnabled = autosendChk.checked;
-      state.uiConfig.autosendEnabled = state.autosendEnabled;
-      saveUIConfig();
-      if (state.autosendEnabled) {
-        ensureSendLoop();
-        ensureProgressLoop();
-      } else {
-        stopProgressLoop();
+    const { wrapper: fineDiv } = createCheckboxOption({
+      id: 'chk-fine',
+      checked: state.fineTuningEnabled,
+      label: 'Enable fine-tune controls',
+      onChange: checked => {
+        state.fineTuningEnabled = checked;
+        state.uiConfig.fineTuningEnabled = state.fineTuningEnabled;
+        saveUIConfig();
+        const fineSection = document.getElementById('section-fine');
+        if (fineSection) {
+          fineSection.style.display = state.fineTuningEnabled ? 'block' : 'none';
+        }
       }
     });
-    const autosendLabel = document.createElement('label');
-    autosendLabel.htmlFor = 'chk-autosend';
-    autosendLabel.textContent = 'Auto-send chat commands';
-    autosendDiv.appendChild(autosendChk);
-    autosendDiv.appendChild(autosendLabel);
 
-    const fineDiv = document.createElement('div');
-    fineDiv.style.marginTop = '8px';
-    const fineChk = document.createElement('input');
-    fineChk.type = 'checkbox';
-    fineChk.id = 'chk-fine';
-    fineChk.checked = state.fineTuningEnabled;
-    fineChk.style.marginRight = '6px';
-    fineChk.addEventListener('change', () => {
-      state.fineTuningEnabled = fineChk.checked;
-      state.uiConfig.fineTuningEnabled = state.fineTuningEnabled;
-      saveUIConfig();
-      const fineSection = document.getElementById('section-fine');
-      if (fineSection) {
-        fineSection.style.display = state.fineTuningEnabled ? 'block' : 'none';
+    const { wrapper: sharpenDiv } = createCheckboxOption({
+      id: 'chk-sharpen',
+      checked: state.sharpeningEnabled,
+      label: 'Enable sharpen filter',
+      onChange: checked => {
+        state.sharpeningEnabled = checked;
+        state.uiConfig.sharpeningEnabled = state.sharpeningEnabled;
+        saveUIConfig();
       }
     });
-    const fineLabel = document.createElement('label');
-    fineLabel.htmlFor = 'chk-fine';
-    fineLabel.textContent = 'Enable fine-tune controls';
-    fineDiv.appendChild(fineChk);
-    fineDiv.appendChild(fineLabel);
 
-    const sharpenDiv = document.createElement('div');
-    sharpenDiv.style.marginTop = '8px';
-    const sharpenChk = document.createElement('input');
-    sharpenChk.type = 'checkbox';
-    sharpenChk.id = 'chk-sharpen';
-    sharpenChk.checked = state.sharpeningEnabled;
-    sharpenChk.style.marginRight = '6px';
-    sharpenChk.addEventListener('change', () => {
-      state.sharpeningEnabled = sharpenChk.checked;
-      state.uiConfig.sharpeningEnabled = state.sharpeningEnabled;
-      saveUIConfig();
+    const { wrapper: guardDiv } = createCheckboxOption({
+      id: 'chk-guard',
+      checked: state.guardExport,
+      label: 'Coupon auto-redeem before sending commands',
+      onChange: checked => {
+        state.guardExport = checked;
+        state.uiConfig.guardExport = state.guardExport;
+        saveUIConfig();
+      }
     });
-    const sharpenLabel = document.createElement('label');
-    sharpenLabel.htmlFor = 'chk-sharpen';
-    sharpenLabel.textContent = 'Enable sharpen filter';
-    sharpenDiv.appendChild(sharpenChk);
-    sharpenDiv.appendChild(sharpenLabel);
-
-    const guardDiv = document.createElement('div');
-    guardDiv.style.marginTop = '8px';
-    const guardChk = document.createElement('input');
-    guardChk.type = 'checkbox';
-    guardChk.id = 'chk-guard';
-    guardChk.checked = state.guard_Export;
-    guardChk.addEventListener('change', () => {
-      state.guard_Export = guardChk.checked;
-      state.uiConfig.guardExport = state.guard_Export;
-      localStorage.setItem('nonogramUIConfig', JSON.stringify(state.uiConfig));
-      console.log('[Reward Redeemer] Guard export set to', state.guard_Export);
-    });
-    const guardLabel = document.createElement('label');
-    guardLabel.htmlFor = 'chk-guard';
-    guardLabel.textContent = 'Coupon auto-redeem before sending commands';
-    guardDiv.appendChild(guardChk);
-    guardDiv.appendChild(guardLabel);
 
     panel.appendChild(autosendDiv);
     panel.appendChild(guardDiv);
@@ -1432,52 +1438,6 @@
     const panel = document.getElementById('extra-config-panel');
     if (!panel) return;
     panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  }
-
-  function createConfigPanel() {
-    if (document.getElementById('config-panel')) return;
-    const panel = document.createElement('div');
-    panel.id = 'config-panel';
-    panel.style.cssText = `
-    position: fixed;
-    top: 60px;
-    left: 60px;
-    background: #fff;
-    padding: 12px;
-    border: 1px solid #000;
-    border-radius: 6px;
-    z-index: 10002;
-    display: none;
-    color: black;
-    font-size: 15px;
-    font-weight: bold;
-    line-height: 1.6em;
-  `;
-    panel.innerHTML = `
-    <label>Size: <input id="cfg-size" type="number" value="${state.size}" /></label><br/>
-    <label>Col Clues: <input id="cfg-cols" type="number" value="${state.colClueCount}" /></label><br/>
-    <label>Fine Tune: <input id="cfg-fine" type="number" value="${state.fineTune}" /></label><br/>
-    <label>Anchor X: <input id="cfg-anchorX" type="number" value="${state.anchorX}" /></label><br/>
-    <label>Anchor Y: <input id="cfg-anchorY" type="number" value="${state.anchorY}" /></label><br/>
-    <button id="cfg-apply">Apply</button>
-    <button id="cfg-close">Close</button>
-  `;
-    document.body.appendChild(panel);
-
-    panel.querySelector('#cfg-apply').onclick = () => {
-      state.size = +panel.querySelector('#cfg-size').value;
-      state.colClueCount = +panel.querySelector('#cfg-cols').value;
-      state.fineTune = +panel.querySelector('#cfg-fine').value;
-      state.anchorX = +panel.querySelector('#cfg-anchorX').value;
-      state.anchorY = +panel.querySelector('#cfg-anchorY').value;
-      saveLayout();
-      initCells();
-      updateCanvasSizeRef();
-    };
-
-    panel.querySelector('#cfg-close').onclick = () => {
-      panel.style.display = 'none';
-    };
   }
 
   function createStatusContainer() {
@@ -1521,9 +1481,8 @@
         let cmd = cmds[idx] || '';
         if (!cmd) return;
         if (state.statusAltCmd) cmd = cmd + 's';
-        console.log(`[StatusCanvas] clicked index=${idx}, sending ${cmd}`);
         try {
-          send_message_with_event(cmd);
+          sendMessageWithEvent(cmd);
           state.statusAltCmd = !state.statusAltCmd;
         } catch (e) {
           console.error('Failed to send status command:', e);
@@ -1544,6 +1503,42 @@
   }
 
   // Manages the overlay frame, canvas rendering, ROI capture, and main action buttons.
+
+  const MINIMIZE_BUTTON_STYLE = {
+    position: 'absolute',
+    top: '4px',
+    left: '4px',
+    width: '24px',
+    height: '24px',
+    fontWeight: 'bold',
+    fontSize: '16px',
+    lineHeight: '22px',
+    textAlign: 'center',
+    zIndex: 10002,
+    background: '#f0f0f0',
+    border: '1px solid #444',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    padding: '0',
+    color: 'black'
+  };
+
+  function createMinimizeButton(onClick) {
+    const button = document.createElement('button');
+    button.textContent = 'X';
+    Object.assign(button.style, MINIMIZE_BUTTON_STYLE);
+    button.onclick = onClick;
+    return button;
+  }
+
+  function getVideoElement() {
+    if (state.videoEl?.isConnected && state.videoEl.readyState >= 2) {
+      return state.videoEl;
+    }
+
+    state.videoEl = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+    return state.videoEl;
+  }
 
   function sharpen(ctx, w, h, mix) {
     let x;
@@ -1602,7 +1597,7 @@
   }
 
   function updateROI() {
-    const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+    const video = getVideoElement();
     if (!video) return;
 
     state.roiCtx.clearRect(0, 0, state.roiCanvas.width, state.roiCanvas.height);
@@ -1622,7 +1617,7 @@
   }
 
   function drawStatus() {
-    const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+    const video = getVideoElement();
     if (!video) return;
 
     const actualWidth = video.videoWidth;
@@ -1671,9 +1666,6 @@
     const btns = document.getElementById('button-container');
     if (btns) btns.style.display = 'none';
 
-    const cfg = document.getElementById('config-panel');
-    if (cfg) cfg.style.display = 'none';
-
     const extraCfg = document.getElementById('extra-config-panel');
     if (extraCfg) extraCfg.style.display = 'none';
 
@@ -1711,27 +1703,7 @@
     if (statusCont) statusCont.style.display = state.statusEnabled ? 'block' : 'none';
 
     if (state.showMinimizeButtons && !state.minimizeBtn) {
-      state.minimizeBtn = document.createElement('button');
-      state.minimizeBtn.textContent = 'X';
-      Object.assign(state.minimizeBtn.style, {
-        position: 'absolute',
-        top: '4px',
-        left: '4px',
-        width: '24px',
-        height: '24px',
-        fontWeight: 'bold',
-        fontSize: '16px',
-        lineHeight: '22px',
-        textAlign: 'center',
-        zIndex: 10002,
-        background: '#f0f0f0',
-        border: '1px solid #444',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        padding: '0',
-        color: 'black'
-      });
-      state.minimizeBtn.onclick = minimizeCanvas;
+      state.minimizeBtn = createMinimizeButton(minimizeCanvas);
       state.frame.appendChild(state.minimizeBtn);
     }
   }
@@ -1769,7 +1741,7 @@
     });
     restoreBtn.onclick = () => restoreCanvas();
 
-    const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+    const video = getVideoElement();
     if (video && video.parentElement) {
       video.parentElement.style.position = 'relative';
       video.parentElement.appendChild(restoreBtn);
@@ -1778,27 +1750,7 @@
     }
 
     if (state.showMinimizeButtons) {
-      state.minimizeBtn = document.createElement('button');
-      state.minimizeBtn.textContent = 'X';
-      Object.assign(state.minimizeBtn.style, {
-        position: 'absolute',
-        top: '4px',
-        left: '4px',
-        width: '24px',
-        height: '24px',
-        fontWeight: 'bold',
-        fontSize: '16px',
-        lineHeight: '22px',
-        textAlign: 'center',
-        zIndex: 10002,
-        background: '#f0f0f0',
-        border: '1px solid #444',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        padding: '0',
-        color: 'black'
-      });
-      state.minimizeBtn.onclick = minimizeCanvas;
+      state.minimizeBtn = createMinimizeButton(minimizeCanvas);
       state.frame.appendChild(state.minimizeBtn);
     }
 
@@ -1968,10 +1920,23 @@
 
   // Bootstraps the userscript, wires the grouped modules together, and handles cleanup.
 
-  configureNonogramGrid({ updateCanvasSize });
-  configureStatusControls({ updateCanvasSize, createGrid, minimizeCanvas });
+  const readyCallbacks = [];
+  const shutdownCallbacks = [];
+  let hasBootstrapped = false;
+
+  function notifyCallbacks(callbacks) {
+    callbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('Lifecycle callback failed:', error);
+      }
+    });
+  }
 
   function cleanup() {
+    notifyCallbacks(shutdownCallbacks);
+
     if (state.activityBtnMonitorId) clearInterval(state.activityBtnMonitorId);
     if (state.progressTimer) clearInterval(state.progressTimer);
     if (state.sendLoopTimer) clearInterval(state.sendLoopTimer);
@@ -1984,14 +1949,27 @@
     if (state.documentMouseUpHandler) {
       document.removeEventListener('mouseup', state.documentMouseUpHandler);
     }
+
+    state.activityBtnMonitorId = null;
+    state.progressTimer = null;
+    state.sendLoopTimer = null;
+    state.roiInterval = null;
+    state.documentMouseMoveHandler = null;
+    state.documentMouseUpHandler = null;
   }
 
   function onLoad() {
+    if (hasBootstrapped) return;
+    hasBootstrapped = true;
+
+    initState();
+    configureNonogramGrid({ updateCanvasSize });
+    configureStatusControls({ updateCanvasSize, createGrid, minimizeCanvas });
+
     setupCanvas();
     initCells();
     updateCanvasSize();
     createMainButtons();
-    createConfigPanel();
     createControlAndStatus();
     createExtraConfigPanel();
     if (state.autosendEnabled) {
@@ -2000,11 +1978,17 @@
     }
     render();
     state.roiInterval = setInterval(updateROI, 1000);
+    notifyCallbacks(readyCallbacks);
   }
 
   function bootstrap() {
     window.addEventListener('beforeunload', cleanup);
-    window.addEventListener('load', onLoad);
+    if (document.readyState === 'complete') {
+      onLoad();
+      return;
+    }
+
+    window.addEventListener('load', onLoad, { once: true });
   }
 
   // Userscript entrypoint that starts the modular app after bundling.

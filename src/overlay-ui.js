@@ -5,6 +5,42 @@ import { toggleExtraConfigPanel } from './status-controls.js';
 import { ensureProgressLoop } from './twitch-chat.js';
 import { minutesSinceRedeem, redeemAndTrack } from './twitch-redeem.js';
 
+const MINIMIZE_BUTTON_STYLE = {
+  position: 'absolute',
+  top: '4px',
+  left: '4px',
+  width: '24px',
+  height: '24px',
+  fontWeight: 'bold',
+  fontSize: '16px',
+  lineHeight: '22px',
+  textAlign: 'center',
+  zIndex: 10002,
+  background: '#f0f0f0',
+  border: '1px solid #444',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  padding: '0',
+  color: 'black'
+};
+
+function createMinimizeButton(onClick) {
+  const button = document.createElement('button');
+  button.textContent = 'X';
+  Object.assign(button.style, MINIMIZE_BUTTON_STYLE);
+  button.onclick = onClick;
+  return button;
+}
+
+function getVideoElement() {
+  if (state.videoEl?.isConnected && state.videoEl.readyState >= 2) {
+    return state.videoEl;
+  }
+
+  state.videoEl = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+  return state.videoEl;
+}
+
 export function sharpen(ctx, w, h, mix) {
   let x;
   let sx;
@@ -62,7 +98,7 @@ export function sharpen(ctx, w, h, mix) {
 }
 
 export function updateROI() {
-  const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+  const video = getVideoElement();
   if (!video) return;
 
   state.roiCtx.clearRect(0, 0, state.roiCanvas.width, state.roiCanvas.height);
@@ -82,7 +118,7 @@ export function updateROI() {
 }
 
 export function drawStatus() {
-  const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+  const video = getVideoElement();
   if (!video) return;
 
   const actualWidth = video.videoWidth;
@@ -131,9 +167,6 @@ export function minimizeCanvas() {
   const btns = document.getElementById('button-container');
   if (btns) btns.style.display = 'none';
 
-  const cfg = document.getElementById('config-panel');
-  if (cfg) cfg.style.display = 'none';
-
   const extraCfg = document.getElementById('extra-config-panel');
   if (extraCfg) extraCfg.style.display = 'none';
 
@@ -171,27 +204,7 @@ export function restoreCanvas() {
   if (statusCont) statusCont.style.display = state.statusEnabled ? 'block' : 'none';
 
   if (state.showMinimizeButtons && !state.minimizeBtn) {
-    state.minimizeBtn = document.createElement('button');
-    state.minimizeBtn.textContent = 'X';
-    Object.assign(state.minimizeBtn.style, {
-      position: 'absolute',
-      top: '4px',
-      left: '4px',
-      width: '24px',
-      height: '24px',
-      fontWeight: 'bold',
-      fontSize: '16px',
-      lineHeight: '22px',
-      textAlign: 'center',
-      zIndex: 10002,
-      background: '#f0f0f0',
-      border: '1px solid #444',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      padding: '0',
-      color: 'black'
-    });
-    state.minimizeBtn.onclick = minimizeCanvas;
+    state.minimizeBtn = createMinimizeButton(minimizeCanvas);
     state.frame.appendChild(state.minimizeBtn);
   }
 }
@@ -229,7 +242,7 @@ export function setupCanvas() {
   });
   restoreBtn.onclick = () => restoreCanvas();
 
-  const video = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2);
+  const video = getVideoElement();
   if (video && video.parentElement) {
     video.parentElement.style.position = 'relative';
     video.parentElement.appendChild(restoreBtn);
@@ -238,27 +251,7 @@ export function setupCanvas() {
   }
 
   if (state.showMinimizeButtons) {
-    state.minimizeBtn = document.createElement('button');
-    state.minimizeBtn.textContent = 'X';
-    Object.assign(state.minimizeBtn.style, {
-      position: 'absolute',
-      top: '4px',
-      left: '4px',
-      width: '24px',
-      height: '24px',
-      fontWeight: 'bold',
-      fontSize: '16px',
-      lineHeight: '22px',
-      textAlign: 'center',
-      zIndex: 10002,
-      background: '#f0f0f0',
-      border: '1px solid #444',
-      borderRadius: '4px',
-      cursor: 'pointer',
-      padding: '0',
-      color: 'black'
-    });
-    state.minimizeBtn.onclick = minimizeCanvas;
+    state.minimizeBtn = createMinimizeButton(minimizeCanvas);
     state.frame.appendChild(state.minimizeBtn);
   }
 

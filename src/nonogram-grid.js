@@ -5,14 +5,33 @@ import { guardedExport } from './twitch-redeem.js';
 
 let updateCanvasSizeRef;
 
+const COL_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+const CELL_EMPTY = 0;
+const CELL_FILLED = 1;
+const CELL_MARKED = 2;
+
+function colLetter(index) {
+  return COL_LETTERS[index];
+}
+
+function safeClipboardWrite(text) {
+  try {
+    navigator.clipboard.writeText(text);
+  } catch (error) {
+    console.warn('Clipboard write failed:', error);
+    alert(text);
+  }
+}
+
 export function configureNonogramGrid({ updateCanvasSize }) {
   updateCanvasSizeRef = updateCanvasSize;
 }
 
 export function initCells() {
-  state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(0));
+  state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(CELL_EMPTY));
   state.lastExported = new Set();
   state.lastExportedWhite = new Set();
+  state.geometryCache = null;
   resetClueDashes();
 }
 
@@ -22,20 +41,17 @@ function clamp(v, min, max) {
 
 export async function exportDartCommand() {
   let msg = '!darts';
-  for (let i = 0; i < msg.length; i++) {
-    if (i === state.lastDartExportIndex) {
-      msg = msg.substring(0, i) + msg[i].toUpperCase() + msg.substring(i + 1);
-      state.lastDartExportIndex++;
-      if (state.lastDartExportIndex >= msg.length) {
-        state.lastDartExportIndex = 1;
-      }
-      break;
-    }
+  const chars = [...msg];
+  chars[state.lastDartExportIndex] = chars[state.lastDartExportIndex].toUpperCase();
+  msg = chars.join('');
+  state.lastDartExportIndex++;
+  if (state.lastDartExportIndex >= msg.length) {
+    state.lastDartExportIndex = 1;
   }
   if (state.autosendEnabled) {
     scheduleSend(msg);
   } else {
-    navigator.clipboard.writeText(msg);
+    safeClipboardWrite(msg);
   }
 }
 
@@ -82,8 +98,22 @@ function removeNearestRowDash(row, canvasX, threshold = 10) {
 }
 
 export function computeGridGeometry() {
+  const cacheKey = [
+    state.size,
+    state.colClueCount,
+    state.fineTune,
+    state.anchorX,
+    state.anchorY,
+    state.canvas?.width,
+    state.canvas?.height
+  ].join(':');
+
+  if (state.geometryCache?.key === cacheKey) {
+    return state.geometryCache.value;
+  }
+
   state.ctx.font = 'bold 30px Arial';
-  const clueW = state.ctx.measureText('0'.repeat(state.rowClueCount)).width;
+  const clueW = state.ctx.measureText('0').width;
   const clueH = 30 * state.colClueCount + 5;
 
   const layout = getLayoutSettings(state.size, state.colClueCount);
@@ -99,7 +129,9 @@ export function computeGridGeometry() {
   const ox = state.canvas.width - cellSize * state.size - state.anchorX;
   const oy = state.canvas.height - cellSize * state.size - state.anchorY;
 
-  return { clueW, clueH, cellSize, ox, oy };
+  const geometry = { clueW, clueH, cellSize, ox, oy };
+  state.geometryCache = { key: cacheKey, value: geometry };
+  return geometry;
 }
 
 function resetClueDashes() {
@@ -119,23 +151,23 @@ function exportCellsInner() {
   const coords = [];
   state.cellStates.forEach((row, r) => {
     row.forEach((s, c) => {
-      if (s === 1) {
-        const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
-        if (!state.lastExported.has(coord)) {
-          coords.push(coord);
-          state.lastExported.add(coord);
+        if (s === 1) {
+          const coord = `${colLetter(c)}${r + 1}`;
+          if (!state.lastExported.has(coord)) {
+            coords.push(coord);
+            state.lastExported.add(coord);
         }
       }
     });
   });
-  if (coords.length) {
-    const msg = `!fill ${coords.join(' ')}`;
-    if (state.autosendEnabled) {
-      scheduleSend(msg);
-    } else {
-      navigator.clipboard.writeText(msg);
+    if (coords.length) {
+      const msg = `!fill ${coords.join(' ')}`;
+      if (state.autosendEnabled) {
+        scheduleSend(msg);
+      } else {
+        safeClipboardWrite(msg);
+      }
     }
-  }
 }
 
 function exportAllCellsInner(mode) {
@@ -149,7 +181,7 @@ function exportAllCellsInner(mode) {
     state.cellStates.forEach((row, r) => {
       row.forEach((s, c) => {
         if (s === 1) {
-          const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+          const coord = `${colLetter(c)}${r + 1}`;
           coords.push(coord);
           state.lastExported.add(coord);
         }
@@ -157,14 +189,14 @@ function exportAllCellsInner(mode) {
     });
     if (coords.length) {
       const msg = `!fill ${coords.join(' ')}`;
-      navigator.clipboard.writeText(msg);
       if (state.autosendEnabled) scheduleSend(msg);
+      else safeClipboardWrite(msg);
     }
   } else if (mode === 'white') {
     state.cellStates.forEach((row, r) => {
       row.forEach((s, c) => {
-        if (s === 2) {
-          const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+        if (s === CELL_MARKED) {
+          const coord = `${colLetter(c)}${r + 1}`;
           coords.push(coord);
           state.lastExportedWhite.add(coord);
         }
@@ -172,8 +204,8 @@ function exportAllCellsInner(mode) {
     });
     if (coords.length) {
       const msg = `!empty ${coords.join(' ')}`;
-      navigator.clipboard.writeText(msg);
       if (state.autosendEnabled) scheduleSend(msg);
+      else safeClipboardWrite(msg);
     }
   }
 }
@@ -183,7 +215,7 @@ function exportWhiteCellsInner() {
   state.cellStates.forEach((row, r) => {
     row.forEach((s, c) => {
       if (s === 2) {
-        const coord = `${String.fromCharCode(97 + c)}${r + 1}`;
+        const coord = `${colLetter(c)}${r + 1}`;
         if (!state.lastExportedWhite.has(coord)) {
           coords.push(coord);
           state.lastExportedWhite.add(coord);
@@ -196,7 +228,7 @@ function exportWhiteCellsInner() {
     if (state.autosendEnabled) {
       scheduleSend(msg);
     } else {
-      navigator.clipboard.writeText(msg);
+      safeClipboardWrite(msg);
     }
   }
 }
@@ -214,19 +246,13 @@ export function exportWhiteCells() {
 }
 
 export function exportClearCommand() {
-  const letters = 'abcdefghijklmnopqrstuvwxyz';
   const ranges = [];
   for (let c = 0; c < state.size; c++) {
-    const col = letters[c];
+    const col = colLetter(c);
     ranges.push(`${col}1-${col}${state.size}`);
   }
   const clearCmd = `!clear ${ranges.join(',')}`;
-  try {
-    navigator.clipboard.writeText(clearCmd);
-  } catch (e) {
-    console.warn('Clipboard write failed:', e);
-    alert(clearCmd);
-  }
+  safeClipboardWrite(clearCmd);
 }
 
 export function createGrid() {
@@ -281,21 +307,24 @@ export function createGrid() {
     }
   }
 
+  const filledColor = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
+  const markedColor = 'rgba(255, 255, 255, 0.6)';
+
   for (let r = 0; r < state.size; r++) {
     for (let c = 0; c < state.size; c++) {
       const x = ox + c * cellSize;
       const y = oy + r * cellSize;
 
-      if (state.cellStates[r][c] === 1) {
-        state.ctx.fillStyle = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
-      } else if (state.cellStates[r][c] === 2) {
-        state.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      if (state.cellStates[r][c] === CELL_FILLED) {
+        state.ctx.fillStyle = filledColor;
+      } else if (state.cellStates[r][c] === CELL_MARKED) {
+        state.ctx.fillStyle = markedColor;
       }
 
       state.ctx.strokeRect(x, y, cellSize, cellSize);
-      if (state.cellStates[r][c] === 1 || state.cellStates[r][c] === 2) {
+      if (state.cellStates[r][c] === CELL_FILLED || state.cellStates[r][c] === CELL_MARKED) {
         state.ctx.fillRect(x, y, cellSize, cellSize);
-        if (state.cellStates[r][c] === 2) state.ctx.fillStyle = 'black';
+        if (state.cellStates[r][c] === CELL_MARKED) state.ctx.fillStyle = 'black';
       }
     }
   }
@@ -341,11 +370,11 @@ export function onCanvasMouseDown(e) {
 
   if (r >= 0 && r < state.size && c >= 0 && c < state.size) {
     state.isMarking = true;
-    state.markValue = e.button === 0 ? 1 : 2;
+    state.markValue = e.button === 0 ? CELL_FILLED : CELL_MARKED;
     state.eraseMode = state.cellStates[r][c] === state.markValue;
 
     const prevValue = state.cellStates[r][c];
-    const newValue = state.eraseMode ? 0 : state.markValue;
+    const newValue = state.eraseMode ? CELL_EMPTY : state.markValue;
     state.cellStates[r][c] = newValue;
     state.currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
     createGrid();
@@ -387,11 +416,13 @@ export function onCanvasMouseMove(e) {
     newCol = c;
   }
 
+  const hoverChanged = newRow !== state.hoveredRow || newCol !== state.hoveredCol;
   state.hoveredRow = newRow;
   state.hoveredCol = newCol;
 
+  let cellChanged = false;
   if (state.isMarking && newRow >= 0 && newCol >= 0) {
-    const targetValue = state.eraseMode ? 0 : state.markValue;
+    const targetValue = state.eraseMode ? CELL_EMPTY : state.markValue;
     if (state.cellStates[newRow][newCol] !== targetValue) {
       if (!state.currentAction) state.currentAction = [];
       state.currentAction.push({
@@ -401,19 +432,22 @@ export function onCanvasMouseMove(e) {
         newValue: targetValue
       });
       state.cellStates[newRow][newCol] = targetValue;
+      cellChanged = true;
     }
   }
 
-  createGrid();
+  if (hoverChanged || cellChanged) {
+    createGrid();
+  }
 }
 
 export function undoLastAction() {
   if (!state.moveHistory.length) return;
   const lastAction = state.moveHistory.pop();
   lastAction.forEach(({ row, col, previous, newValue }) => {
-    const coord = `${String.fromCharCode(97 + col)}${row + 1}`;
-    if (newValue === 1) state.lastExported.delete(coord);
-    if (newValue === 2) state.lastExportedWhite.delete(coord);
+    const coord = `${colLetter(col)}${row + 1}`;
+    if (newValue === CELL_FILLED) state.lastExported.delete(coord);
+    if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
     state.cellStates[row][col] = previous;
   });
   createGrid();
@@ -449,12 +483,14 @@ export function incrementCols() {
 
 export function decrementFineTune() {
   state.fineTune--;
+  state.geometryCache = null;
   saveLayout();
   updateCanvasSizeRef();
 }
 
 export function incrementFineTune() {
   state.fineTune++;
+  state.geometryCache = null;
   saveLayout();
   updateCanvasSizeRef();
 }
@@ -462,7 +498,6 @@ export function incrementFineTune() {
 export function resetSizeDefaults() {
   saveLayout();
   state.size = 4;
-  state.rowClueCount = 1;
   state.colClueCount = 1;
   initCells();
   updateCanvasSizeRef();
