@@ -33,12 +33,7 @@ function createMinimizeButton(onClick) {
 }
 
 export function getVideoElement() {
-  if (state.videoEl?.isConnected && state.videoEl.readyState >= 2) {
-    return state.videoEl;
-  }
-
-  state.videoEl = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
-  return state.videoEl;
+  return [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
 }
 
 export function sharpen(ctx, w, h, mix) {

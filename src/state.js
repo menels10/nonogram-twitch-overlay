@@ -24,7 +24,6 @@ export const state = {
   roiHeightPercent: 0.584,
   configs: {},
   autosendEnabled: false,
-  videoEl: null,
   canvas: null,
   ctx: null,
   frame: null,

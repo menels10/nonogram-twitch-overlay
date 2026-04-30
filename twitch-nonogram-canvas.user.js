@@ -38,7 +38,6 @@
     roiHeightPercent: 0.584,
     configs: {},
     autosendEnabled: false,
-    videoEl: null,
     canvas: null,
     ctx: null,
     frame: null,
@@ -1535,12 +1534,7 @@
   }
 
   function getVideoElement() {
-    if (state.videoEl?.isConnected && state.videoEl.readyState >= 2) {
-      return state.videoEl;
-    }
-
-    state.videoEl = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
-    return state.videoEl;
+    return [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
   }
 
   function sharpen(ctx, w, h, mix) {
