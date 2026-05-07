@@ -16,9 +16,32 @@ A draggable nonogram puzzle overlay for Twitch streams, complete with canvas ren
 🛠 Installation
 Install Tampermonkey in your browser.
 
-Add a new userscript and paste in the code.
+Build the userscript if you are working from source:
+
+```bash
+npm install
+npm run build
+```
+
+The generated userscript is written to:
+
+- `twitch-nonogram-canvas.user.js`
+
+`twitch-nonogram-canvas.user.js` is generated from the files in `src/`. Edit the source modules and rebuild instead of editing the generated userscript directly.
+
+Add a new userscript and paste in the code, or install the generated `.user.js` file directly.
 
 Visit gokiccoon Twitch stream.
+
+🧪 Development
+
+Rebuild automatically while working on the source modules:
+
+```bash
+npm run build:watch
+```
+
+This watches the `src/` files and updates `twitch-nonogram-canvas.user.js` on changes.
 
 🧾 How to Use
 🔲 Grid Interaction
