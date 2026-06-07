@@ -403,7 +403,17 @@ export function createStatusContainer() {
 
   const cw = Math.max(40, controlContainer.clientWidth - 20);
   const ch = Math.round((cw * 80) / 250);
-  const cmds = ['!eat', '!sleep', '!play'];
+  const cmdGroups = [
+    ['!eat', '!feed', '!munch', '!snack', '!nibble', '!devour', '!nom', '!dine'],
+    ['!sleep', '!nap', '!rest', '!doze', '!snooze', '!hibernate', '!bed', '!chill'],
+    ['!play', '!game', '!interact', '!train']
+  ];
+
+  function randomizeCaps(str) {
+    return str.split('').map(ch =>
+      Math.random() < 0.5 ? ch.toUpperCase() : ch.toLowerCase()
+    ).join('');
+  }
 
   state.statusCanvases = [];
 
@@ -425,12 +435,12 @@ export function createStatusContainer() {
 
     const sctx = sc.getContext('2d');
     sc.addEventListener('click', () => {
-      let cmd = cmds[idx] || '';
-      if (!cmd) return;
-      if (state.statusAltCmd) cmd = cmd + 's';
+      const group = cmdGroups[idx] || [];
+      if (!group.length) return;
+      const base = group[Math.floor(Math.random() * group.length)];
+      const cmd = randomizeCaps(base);
       try {
         sendMessageWithEvent(cmd);
-        state.statusAltCmd = !state.statusAltCmd;
       } catch (e) {
         console.error('Failed to send status command:', e);
       }
