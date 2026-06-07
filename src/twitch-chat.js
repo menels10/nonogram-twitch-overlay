@@ -78,7 +78,7 @@ export function ensureSendLoop() {
 
 export function ensureProgressLoop() {
   if (state.progressTimer) return;
-  state.progressTimer = setInterval(updateCooldownUI, 100);
+  state.progressTimer = setInterval(updateCooldownUI, 200);
 }
 
 export function stopProgressLoop() {
