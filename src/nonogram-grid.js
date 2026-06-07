@@ -32,6 +32,7 @@ export function initCells() {
   state.lastExported = new Set();
   state.lastExportedWhite = new Set();
   state.geometryCache = null;
+  state.dirtyGrid = true;
   resetClueDashes();
 }
 
@@ -59,6 +60,7 @@ function addColDash(col, pos, clueH) {
   if (col < 0 || col >= state.size) return;
   if (!Array.isArray(state.colDashes[col])) state.colDashes[col] = [];
   state.colDashes[col].push(clamp(pos, 0, clueH));
+  state.dirtyGrid = true;
 }
 
 function removeNearestColDash(col, pos, threshold = 10) {
@@ -73,13 +75,17 @@ function removeNearestColDash(col, pos, threshold = 10) {
       best = i;
     }
   }
-  if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+  if (best !== -1 && bestDist <= threshold) {
+    arr.splice(best, 1);
+    state.dirtyGrid = true;
+  }
 }
 
 function addRowDash(row, canvasX) {
   if (row < 0 || row >= state.size) return;
   if (!Array.isArray(state.rowDashes[row])) state.rowDashes[row] = [];
   state.rowDashes[row].push(canvasX);
+  state.dirtyGrid = true;
 }
 
 function removeNearestRowDash(row, canvasX, threshold = 10) {
@@ -94,7 +100,10 @@ function removeNearestRowDash(row, canvasX, threshold = 10) {
       best = i;
     }
   }
-  if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+  if (best !== -1 && bestDist <= threshold) {
+    arr.splice(best, 1);
+    state.dirtyGrid = true;
+  }
 }
 
 export function computeGridGeometry() {
@@ -170,11 +179,9 @@ function exportCellsInner() {
     }
 }
 
-function exportAllCellsInner(mode) {
+function exportAllCellsInner(mode = 'black') {
   state.lastExported.clear();
   state.lastExportedWhite.clear();
-
-  if (!mode) return;
 
   const coords = [];
   if (mode === 'black') {
@@ -258,9 +265,6 @@ export function exportClearCommand() {
 export function createGrid() {
   const { clueH, cellSize, ox, oy } = computeGridGeometry();
 
-  state.ctx.strokeStyle = 'cyan';
-  state.ctx.lineWidth = 1;
-
   if ((state.hoveredRow >= 0 && state.hoveredRow < state.size) || (state.hoveredCol >= 0 && state.hoveredCol < state.size)) {
     state.ctx.fillStyle = 'rgba(100, 150, 255, 0.25)';
 
@@ -310,24 +314,33 @@ export function createGrid() {
   const filledColor = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
   const markedColor = 'rgba(255, 255, 255, 0.6)';
 
+  const gridRight = ox + state.size * cellSize;
+  const gridBottom = oy + state.size * cellSize;
+
+  state.ctx.strokeStyle = 'cyan';
+  state.ctx.lineWidth = 1;
+  state.ctx.beginPath();
+  for (let i = 0; i <= state.size; i++) {
+    const x = ox + i * cellSize;
+    const y = oy + i * cellSize;
+    state.ctx.moveTo(x, oy);
+    state.ctx.lineTo(x, gridBottom);
+    state.ctx.moveTo(ox, y);
+    state.ctx.lineTo(gridRight, y);
+  }
+  state.ctx.stroke();
+
   for (let r = 0; r < state.size; r++) {
     for (let c = 0; c < state.size; c++) {
+      const val = state.cellStates[r][c];
+      if (val === CELL_EMPTY) continue;
       const x = ox + c * cellSize;
       const y = oy + r * cellSize;
-
-      if (state.cellStates[r][c] === CELL_FILLED) {
-        state.ctx.fillStyle = filledColor;
-      } else if (state.cellStates[r][c] === CELL_MARKED) {
-        state.ctx.fillStyle = markedColor;
-      }
-
-      state.ctx.strokeRect(x, y, cellSize, cellSize);
-      if (state.cellStates[r][c] === CELL_FILLED || state.cellStates[r][c] === CELL_MARKED) {
-        state.ctx.fillRect(x, y, cellSize, cellSize);
-        if (state.cellStates[r][c] === CELL_MARKED) state.ctx.fillStyle = 'black';
-      }
+      state.ctx.fillStyle = val === CELL_FILLED ? filledColor : markedColor;
+      state.ctx.fillRect(x, y, cellSize, cellSize);
     }
   }
+  state.dirtyGrid = false;
 }
 
 export function onCanvasMouseDown(e) {
