@@ -36,6 +36,15 @@ function cleanup() {
   if (state.documentMouseUpHandler) {
     document.removeEventListener('mouseup', state.documentMouseUpHandler);
   }
+  if (state.canvas && state.canvasMouseDownHandler) {
+    state.canvas.removeEventListener('mousedown', state.canvasMouseDownHandler);
+  }
+  if (state.canvas && state.canvasMouseMoveHandler) {
+    state.canvas.removeEventListener('mousemove', state.canvasMouseMoveHandler);
+  }
+  if (state.canvas && state.canvasContextMenuHandler) {
+    state.canvas.removeEventListener('contextmenu', state.canvasContextMenuHandler);
+  }
 
   state.activityBtnMonitorId = null;
   state.progressTimer = null;
@@ -44,6 +53,9 @@ function cleanup() {
   state.buttonContainer = null;
   state.documentMouseMoveHandler = null;
   state.documentMouseUpHandler = null;
+  state.canvasMouseDownHandler = null;
+  state.canvasMouseMoveHandler = null;
+  state.canvasContextMenuHandler = null;
 }
 
 function onLoad() {
