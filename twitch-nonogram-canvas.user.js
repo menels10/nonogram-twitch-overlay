@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.55
+// @version      4.56
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+86maylin+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -83,7 +83,12 @@
     roiInterval: null,
     autoRedeemTimer: null,
     documentMouseMoveHandler: null,
-    documentMouseUpHandler: null
+    documentMouseUpHandler: null,
+    dirtyGrid: true,
+    cachedVideo: null,
+    canvasMouseDownHandler: null,
+    canvasMouseMoveHandler: null,
+    canvasContextMenuHandler: null
   };
 
   function initState() {
@@ -220,7 +225,196 @@
     '20_7': { cellSize: 14.6, anchorX: 1.5, anchorY: 10 },
     '20_8': { cellSize: 13.3, anchorX: 1.75, anchorY: 10 },
     '20_9': { cellSize: 13.3, anchorX: 1.5, anchorY: 10 },
-    '20_10': { cellSize: 12, anchorX: 1.5, anchorY: 10 }
+    '20_10': { cellSize: 12, anchorX: 1.5, anchorY: 10 },
+    // Sizes 21-28 (auto-generated)
+    '21_1': { cellSize: 17.3, anchorX: 1.5, anchorY: 10 },
+    '21_2': { cellSize: 17.15, anchorX: 1.5, anchorY: 10 },
+    '21_3': { cellSize: 16.25, anchorX: 1.5, anchorY: 10 },
+    '21_4': { cellSize: 15.7, anchorX: 1.5, anchorY: 10 },
+    '21_5': { cellSize: 15.2, anchorX: 1.5, anchorY: 10 },
+    '21_6': { cellSize: 14.15, anchorX: 1.5, anchorY: 10 },
+    '21_7': { cellSize: 13.8, anchorX: 1.5, anchorY: 10 },
+    '21_8': { cellSize: 12.65, anchorX: 1.5, anchorY: 10 },
+    '21_9': { cellSize: 12.65, anchorX: 1.5, anchorY: 10 },
+    '21_10': { cellSize: 11.3, anchorX: 1.5, anchorY: 10 },
+    '21_11': { cellSize: 10.65, anchorX: 1.5, anchorY: 10 },
+    '21_12': { cellSize: 9.95, anchorX: 1.5, anchorY: 10 },
+    '21_13': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
+    '21_14': { cellSize: 8.65, anchorX: 1.5, anchorY: 10 },
+    '21_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_1': { cellSize: 16.5, anchorX: 1.5, anchorY: 10 },
+    '22_2': { cellSize: 16.4, anchorX: 1.5, anchorY: 10 },
+    '22_3': { cellSize: 15.55, anchorX: 1.5, anchorY: 10 },
+    '22_4': { cellSize: 15.05, anchorX: 1.5, anchorY: 10 },
+    '22_5': { cellSize: 14.6, anchorX: 1.5, anchorY: 10 },
+    '22_6': { cellSize: 13.5, anchorX: 1.5, anchorY: 10 },
+    '22_7': { cellSize: 13.25, anchorX: 1.5, anchorY: 10 },
+    '22_8': { cellSize: 12.0, anchorX: 1.5, anchorY: 10 },
+    '22_9': { cellSize: 12.0, anchorX: 1.5, anchorY: 10 },
+    '22_10': { cellSize: 10.8, anchorX: 1.5, anchorY: 10 },
+    '22_11': { cellSize: 10.15, anchorX: 1.5, anchorY: 10 },
+    '22_12': { cellSize: 9.5, anchorX: 1.5, anchorY: 10 },
+    '22_13': { cellSize: 8.85, anchorX: 1.5, anchorY: 10 },
+    '22_14': { cellSize: 8.25, anchorX: 1.5, anchorY: 10 },
+    '22_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_1': { cellSize: 15.8, anchorX: 1.5, anchorY: 10 },
+    '23_2': { cellSize: 15.75, anchorX: 1.5, anchorY: 10 },
+    '23_3': { cellSize: 14.9, anchorX: 1.5, anchorY: 10 },
+    '23_4': { cellSize: 14.45, anchorX: 1.5, anchorY: 10 },
+    '23_5': { cellSize: 14.05, anchorX: 1.5, anchorY: 10 },
+    '23_6': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '23_7': { cellSize: 12.75, anchorX: 1.5, anchorY: 10 },
+    '23_8': { cellSize: 11.35, anchorX: 1.5, anchorY: 10 },
+    '23_9': { cellSize: 11.35, anchorX: 1.5, anchorY: 10 },
+    '23_10': { cellSize: 10.3, anchorX: 1.5, anchorY: 10 },
+    '23_11': { cellSize: 9.7, anchorX: 1.5, anchorY: 10 },
+    '23_12': { cellSize: 9.1, anchorX: 1.5, anchorY: 10 },
+    '23_13': { cellSize: 8.5, anchorX: 1.5, anchorY: 10 },
+    '23_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_1': { cellSize: 15.1, anchorX: 1.5, anchorY: 10 },
+    '24_2': { cellSize: 15.1, anchorX: 1.5, anchorY: 10 },
+    '24_3': { cellSize: 14.35, anchorX: 1.5, anchorY: 10 },
+    '24_4': { cellSize: 13.9, anchorX: 1.5, anchorY: 10 },
+    '24_5': { cellSize: 13.5, anchorX: 1.5, anchorY: 10 },
+    '24_6': { cellSize: 12.4, anchorX: 1.5, anchorY: 10 },
+    '24_7': { cellSize: 12.25, anchorX: 1.5, anchorY: 10 },
+    '24_8': { cellSize: 10.8, anchorX: 1.5, anchorY: 10 },
+    '24_9': { cellSize: 10.8, anchorX: 1.5, anchorY: 10 },
+    '24_10': { cellSize: 9.85, anchorX: 1.5, anchorY: 10 },
+    '24_11': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
+    '24_12': { cellSize: 8.7, anchorX: 1.5, anchorY: 10 },
+    '24_13': { cellSize: 8.1, anchorX: 1.5, anchorY: 10 },
+    '24_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_1': { cellSize: 14.5, anchorX: 1.5, anchorY: 10 },
+    '25_2': { cellSize: 14.5, anchorX: 1.5, anchorY: 10 },
+    '25_3': { cellSize: 13.8, anchorX: 1.5, anchorY: 10 },
+    '25_4': { cellSize: 13.4, anchorX: 1.5, anchorY: 10 },
+    '25_5': { cellSize: 13.05, anchorX: 1.5, anchorY: 10 },
+    '25_6': { cellSize: 11.95, anchorX: 1.5, anchorY: 10 },
+    '25_7': { cellSize: 11.85, anchorX: 1.5, anchorY: 10 },
+    '25_8': { cellSize: 10.3, anchorX: 1.5, anchorY: 10 },
+    '25_9': { cellSize: 10.3, anchorX: 1.5, anchorY: 10 },
+    '25_10': { cellSize: 9.45, anchorX: 1.5, anchorY: 10 },
+    '25_11': { cellSize: 8.9, anchorX: 1.5, anchorY: 10 },
+    '25_12': { cellSize: 8.35, anchorX: 1.5, anchorY: 10 },
+    '25_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_1': { cellSize: 13.95, anchorX: 1.5, anchorY: 10 },
+    '26_2': { cellSize: 13.95, anchorX: 1.5, anchorY: 10 },
+    '26_3': { cellSize: 13.3, anchorX: 1.5, anchorY: 10 },
+    '26_4': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '26_5': { cellSize: 12.6, anchorX: 1.5, anchorY: 10 },
+    '26_6': { cellSize: 11.5, anchorX: 1.5, anchorY: 10 },
+    '26_7': { cellSize: 11.45, anchorX: 1.5, anchorY: 10 },
+    '26_8': { cellSize: 9.8, anchorX: 1.5, anchorY: 10 },
+    '26_9': { cellSize: 9.8, anchorX: 1.5, anchorY: 10 },
+    '26_10': { cellSize: 9.1, anchorX: 1.5, anchorY: 10 },
+    '26_11': { cellSize: 8.55, anchorX: 1.5, anchorY: 10 },
+    '26_12': { cellSize: 8.05, anchorX: 1.5, anchorY: 10 },
+    '26_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_1': { cellSize: 13.45, anchorX: 1.5, anchorY: 10 },
+    '27_2': { cellSize: 13.45, anchorX: 1.5, anchorY: 10 },
+    '27_3': { cellSize: 12.85, anchorX: 1.5, anchorY: 10 },
+    '27_4': { cellSize: 12.5, anchorX: 1.5, anchorY: 10 },
+    '27_5': { cellSize: 12.2, anchorX: 1.5, anchorY: 10 },
+    '27_6': { cellSize: 11.05, anchorX: 1.5, anchorY: 10 },
+    '27_7': { cellSize: 11.05, anchorX: 1.5, anchorY: 10 },
+    '27_8': { cellSize: 9.35, anchorX: 1.5, anchorY: 10 },
+    '27_9': { cellSize: 9.35, anchorX: 1.5, anchorY: 10 },
+    '27_10': { cellSize: 8.75, anchorX: 1.5, anchorY: 10 },
+    '27_11': { cellSize: 8.25, anchorX: 1.5, anchorY: 10 },
+    '27_12': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_26': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_1': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '28_2': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '28_3': { cellSize: 12.4, anchorX: 1.5, anchorY: 10 },
+    '28_4': { cellSize: 12.1, anchorX: 1.5, anchorY: 10 },
+    '28_5': { cellSize: 11.8, anchorX: 1.5, anchorY: 10 },
+    '28_6': { cellSize: 10.7, anchorX: 1.5, anchorY: 10 },
+    '28_7': { cellSize: 10.7, anchorX: 1.5, anchorY: 10 },
+    '28_8': { cellSize: 8.95, anchorX: 1.5, anchorY: 10 },
+    '28_9': { cellSize: 8.95, anchorX: 1.5, anchorY: 10 },
+    '28_10': { cellSize: 8.45, anchorX: 1.5, anchorY: 10 },
+    '28_11': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_12': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_26': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_27': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
   };
 
   const statusRegions = [
@@ -361,7 +555,7 @@
 
   function ensureProgressLoop() {
     if (state.progressTimer) return;
-    state.progressTimer = setInterval(updateCooldownUI, 100);
+    state.progressTimer = setInterval(updateCooldownUI, 200);
   }
 
   function stopProgressLoop() {
@@ -601,6 +795,7 @@
     state.lastExported = new Set();
     state.lastExportedWhite = new Set();
     state.geometryCache = null;
+    state.dirtyGrid = true;
     resetClueDashes();
   }
 
@@ -628,6 +823,7 @@
     if (col < 0 || col >= state.size) return;
     if (!Array.isArray(state.colDashes[col])) state.colDashes[col] = [];
     state.colDashes[col].push(clamp(pos, 0, clueH));
+    state.dirtyGrid = true;
   }
 
   function removeNearestColDash(col, pos, threshold = 10) {
@@ -642,13 +838,17 @@
         best = i;
       }
     }
-    if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+    if (best !== -1 && bestDist <= threshold) {
+      arr.splice(best, 1);
+      state.dirtyGrid = true;
+    }
   }
 
   function addRowDash(row, canvasX) {
     if (row < 0 || row >= state.size) return;
     if (!Array.isArray(state.rowDashes[row])) state.rowDashes[row] = [];
     state.rowDashes[row].push(canvasX);
+    state.dirtyGrid = true;
   }
 
   function removeNearestRowDash(row, canvasX, threshold = 10) {
@@ -663,7 +863,10 @@
         best = i;
       }
     }
-    if (best !== -1 && bestDist <= threshold) arr.splice(best, 1);
+    if (best !== -1 && bestDist <= threshold) {
+      arr.splice(best, 1);
+      state.dirtyGrid = true;
+    }
   }
 
   function computeGridGeometry() {
@@ -739,11 +942,9 @@
       }
   }
 
-  function exportAllCellsInner(mode) {
+  function exportAllCellsInner(mode = 'black') {
     state.lastExported.clear();
     state.lastExportedWhite.clear();
-
-    if (!mode) return;
 
     const coords = [];
     if (mode === 'black') {
@@ -827,9 +1028,6 @@
   function createGrid() {
     const { clueH, cellSize, ox, oy } = computeGridGeometry();
 
-    state.ctx.strokeStyle = 'cyan';
-    state.ctx.lineWidth = 1;
-
     if ((state.hoveredRow >= 0 && state.hoveredRow < state.size) || (state.hoveredCol >= 0 && state.hoveredCol < state.size)) {
       state.ctx.fillStyle = 'rgba(100, 150, 255, 0.25)';
 
@@ -879,24 +1077,33 @@
     const filledColor = state.useBlueFill ? 'rgba(50, 50, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)';
     const markedColor = 'rgba(255, 255, 255, 0.6)';
 
+    const gridRight = ox + state.size * cellSize;
+    const gridBottom = oy + state.size * cellSize;
+
+    state.ctx.strokeStyle = 'cyan';
+    state.ctx.lineWidth = 1;
+    state.ctx.beginPath();
+    for (let i = 0; i <= state.size; i++) {
+      const x = ox + i * cellSize;
+      const y = oy + i * cellSize;
+      state.ctx.moveTo(x, oy);
+      state.ctx.lineTo(x, gridBottom);
+      state.ctx.moveTo(ox, y);
+      state.ctx.lineTo(gridRight, y);
+    }
+    state.ctx.stroke();
+
     for (let r = 0; r < state.size; r++) {
       for (let c = 0; c < state.size; c++) {
+        const val = state.cellStates[r][c];
+        if (val === CELL_EMPTY) continue;
         const x = ox + c * cellSize;
         const y = oy + r * cellSize;
-
-        if (state.cellStates[r][c] === CELL_FILLED) {
-          state.ctx.fillStyle = filledColor;
-        } else if (state.cellStates[r][c] === CELL_MARKED) {
-          state.ctx.fillStyle = markedColor;
-        }
-
-        state.ctx.strokeRect(x, y, cellSize, cellSize);
-        if (state.cellStates[r][c] === CELL_FILLED || state.cellStates[r][c] === CELL_MARKED) {
-          state.ctx.fillRect(x, y, cellSize, cellSize);
-          if (state.cellStates[r][c] === CELL_MARKED) state.ctx.fillStyle = 'black';
-        }
+        state.ctx.fillStyle = val === CELL_FILLED ? filledColor : markedColor;
+        state.ctx.fillRect(x, y, cellSize, cellSize);
       }
     }
+    state.dirtyGrid = false;
   }
 
   function onCanvasMouseDown(e) {
@@ -1458,7 +1665,17 @@
 
     const cw = Math.max(40, controlContainer.clientWidth - 20);
     const ch = Math.round((cw * 80) / 250);
-    const cmds = ['!eat', '!sleep', '!play'];
+    const cmdGroups = [
+      ['!eat', '!feed', '!munch', '!snack', '!nibble', '!devour', '!nom', '!dine'],
+      ['!sleep', '!nap', '!rest', '!doze', '!snooze', '!hibernate', '!bed', '!chill'],
+      ['!play', '!game', '!interact', '!train']
+    ];
+
+    function randomizeCaps(str) {
+      return str.split('').map(ch =>
+        Math.random() < 0.5 ? ch.toUpperCase() : ch.toLowerCase()
+      ).join('');
+    }
 
     state.statusCanvases = [];
 
@@ -1480,12 +1697,12 @@
 
       const sctx = sc.getContext('2d');
       sc.addEventListener('click', () => {
-        let cmd = cmds[idx] || '';
-        if (!cmd) return;
-        if (state.statusAltCmd) cmd = cmd + 's';
+        const group = cmdGroups[idx] || [];
+        if (!group.length) return;
+        const base = group[Math.floor(Math.random() * group.length)];
+        const cmd = randomizeCaps(base);
         try {
           sendMessageWithEvent(cmd);
-          state.statusAltCmd = !state.statusAltCmd;
         } catch (e) {
           console.error('Failed to send status command:', e);
         }
@@ -1534,63 +1751,15 @@
   }
 
   function getVideoElement() {
-    return [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+    if (state.cachedVideo && state.cachedVideo.readyState >= 2 && !state.cachedVideo.paused) {
+      return state.cachedVideo;
+    }
+    state.cachedVideo = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+    return state.cachedVideo;
   }
 
-  function sharpen(ctx, w, h, mix) {
-    let x;
-    let sx;
-    let sy;
-    let r;
-    let g;
-    let b;
-    let a;
-    let dstOff;
-    let srcOff;
-    let wt;
-    let cx;
-    let cy;
-    let scy;
-    let scx;
-    const weights = [0, -1, 0, -1, 5, -1, 0, -1, 0];
-    const katet = Math.round(Math.sqrt(weights.length));
-    const half = (katet * 0.5) | 0;
-    const dstData = ctx.createImageData(w, h);
-    const dstBuff = dstData.data;
-    const srcBuff = ctx.getImageData(0, 0, w, h).data;
-    let y = h;
-
-    while (y--) {
-      x = w;
-      while (x--) {
-        sy = y;
-        sx = x;
-        dstOff = (y * w + x) * 4;
-        r = g = b = a = 0;
-
-        for (cy = 0; cy < katet; cy++) {
-          for (cx = 0; cx < katet; cx++) {
-            scy = sy + cy - half;
-            scx = sx + cx - half;
-            if (scy >= 0 && scy < h && scx >= 0 && scx < w) {
-              srcOff = (scy * w + scx) * 4;
-              wt = weights[cy * katet + cx];
-              r += srcBuff[srcOff] * wt;
-              g += srcBuff[srcOff + 1] * wt;
-              b += srcBuff[srcOff + 2] * wt;
-              a += srcBuff[srcOff + 3] * wt;
-            }
-          }
-        }
-
-        dstBuff[dstOff] = r * mix + srcBuff[dstOff] * (1 - mix);
-        dstBuff[dstOff + 1] = g * mix + srcBuff[dstOff + 1] * (1 - mix);
-        dstBuff[dstOff + 2] = b * mix + srcBuff[dstOff + 2] * (1 - mix);
-        dstBuff[dstOff + 3] = srcBuff[dstOff + 3];
-      }
-    }
-
-    ctx.putImageData(dstData, 0, 0);
+  function sharpen(ctx) {
+    ctx.filter = 'contrast(1.2) saturate(1.05)';
   }
 
   function updateROI() {
@@ -1606,11 +1775,11 @@
     const roiX = actualWidth - roiWidth;
     const roiY = actualHeight - roiHeight;
 
-    state.roiCtx.drawImage(video, roiX, roiY, roiWidth, roiHeight, 0, 0, state.roiCanvas.width, state.roiCanvas.height);
-
     if (state.sharpeningEnabled) {
-      sharpen(state.roiCtx, state.roiCanvas.width, state.roiCanvas.height, 0.9);
+      sharpen(state.roiCtx);
     }
+    state.roiCtx.drawImage(video, roiX, roiY, roiWidth, roiHeight, 0, 0, state.roiCanvas.width, state.roiCanvas.height);
+    state.roiCtx.filter = 'none';
   }
 
   function drawStatus() {
@@ -1751,7 +1920,8 @@
       state.frame.appendChild(state.minimizeBtn);
     }
 
-    state.canvas.addEventListener('mousedown', onCanvasMouseDown);
+    state.canvasMouseDownHandler = onCanvasMouseDown;
+    state.canvas.addEventListener('mousedown', state.canvasMouseDownHandler);
 
     state.documentMouseMoveHandler = e => {
       if (state.isDragging) {
@@ -1771,10 +1941,10 @@
     };
     document.addEventListener('mouseup', state.documentMouseUpHandler);
 
-    state.canvas.addEventListener('mousemove', onCanvasMouseMove);
-    state.canvas.addEventListener('contextmenu', e => {
-      e.preventDefault();
-    });
+    state.canvasMouseMoveHandler = onCanvasMouseMove;
+    state.canvas.addEventListener('mousemove', state.canvasMouseMoveHandler);
+    state.canvasContextMenuHandler = e => { e.preventDefault(); };
+    state.canvas.addEventListener('contextmenu', state.canvasContextMenuHandler);
   }
 
   function updateCanvasSize() {
@@ -1947,6 +2117,15 @@
     if (state.documentMouseUpHandler) {
       document.removeEventListener('mouseup', state.documentMouseUpHandler);
     }
+    if (state.canvas && state.canvasMouseDownHandler) {
+      state.canvas.removeEventListener('mousedown', state.canvasMouseDownHandler);
+    }
+    if (state.canvas && state.canvasMouseMoveHandler) {
+      state.canvas.removeEventListener('mousemove', state.canvasMouseMoveHandler);
+    }
+    if (state.canvas && state.canvasContextMenuHandler) {
+      state.canvas.removeEventListener('contextmenu', state.canvasContextMenuHandler);
+    }
 
     state.activityBtnMonitorId = null;
     state.progressTimer = null;
@@ -1955,6 +2134,9 @@
     state.buttonContainer = null;
     state.documentMouseMoveHandler = null;
     state.documentMouseUpHandler = null;
+    state.canvasMouseDownHandler = null;
+    state.canvasMouseMoveHandler = null;
+    state.canvasContextMenuHandler = null;
   }
 
   function onLoad() {
