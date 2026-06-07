@@ -33,63 +33,15 @@ function createMinimizeButton(onClick) {
 }
 
 export function getVideoElement() {
-  return [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+  if (state.cachedVideo && state.cachedVideo.readyState >= 2 && !state.cachedVideo.paused) {
+    return state.cachedVideo;
+  }
+  state.cachedVideo = [...document.querySelectorAll('video')].reverse().find(v => v.readyState >= 2) || null;
+  return state.cachedVideo;
 }
 
-export function sharpen(ctx, w, h, mix) {
-  let x;
-  let sx;
-  let sy;
-  let r;
-  let g;
-  let b;
-  let a;
-  let dstOff;
-  let srcOff;
-  let wt;
-  let cx;
-  let cy;
-  let scy;
-  let scx;
-  const weights = [0, -1, 0, -1, 5, -1, 0, -1, 0];
-  const katet = Math.round(Math.sqrt(weights.length));
-  const half = (katet * 0.5) | 0;
-  const dstData = ctx.createImageData(w, h);
-  const dstBuff = dstData.data;
-  const srcBuff = ctx.getImageData(0, 0, w, h).data;
-  let y = h;
-
-  while (y--) {
-    x = w;
-    while (x--) {
-      sy = y;
-      sx = x;
-      dstOff = (y * w + x) * 4;
-      r = g = b = a = 0;
-
-      for (cy = 0; cy < katet; cy++) {
-        for (cx = 0; cx < katet; cx++) {
-          scy = sy + cy - half;
-          scx = sx + cx - half;
-          if (scy >= 0 && scy < h && scx >= 0 && scx < w) {
-            srcOff = (scy * w + scx) * 4;
-            wt = weights[cy * katet + cx];
-            r += srcBuff[srcOff] * wt;
-            g += srcBuff[srcOff + 1] * wt;
-            b += srcBuff[srcOff + 2] * wt;
-            a += srcBuff[srcOff + 3] * wt;
-          }
-        }
-      }
-
-      dstBuff[dstOff] = r * mix + srcBuff[dstOff] * (1 - mix);
-      dstBuff[dstOff + 1] = g * mix + srcBuff[dstOff + 1] * (1 - mix);
-      dstBuff[dstOff + 2] = b * mix + srcBuff[dstOff + 2] * (1 - mix);
-      dstBuff[dstOff + 3] = srcBuff[dstOff + 3];
-    }
-  }
-
-  ctx.putImageData(dstData, 0, 0);
+export function sharpen(ctx) {
+  ctx.filter = 'contrast(1.2) saturate(1.05)';
 }
 
 export function updateROI() {
@@ -105,11 +57,11 @@ export function updateROI() {
   const roiX = actualWidth - roiWidth;
   const roiY = actualHeight - roiHeight;
 
-  state.roiCtx.drawImage(video, roiX, roiY, roiWidth, roiHeight, 0, 0, state.roiCanvas.width, state.roiCanvas.height);
-
   if (state.sharpeningEnabled) {
-    sharpen(state.roiCtx, state.roiCanvas.width, state.roiCanvas.height, 0.9);
+    sharpen(state.roiCtx);
   }
+  state.roiCtx.drawImage(video, roiX, roiY, roiWidth, roiHeight, 0, 0, state.roiCanvas.width, state.roiCanvas.height);
+  state.roiCtx.filter = 'none';
 }
 
 export function drawStatus() {
@@ -250,7 +202,8 @@ export function setupCanvas() {
     state.frame.appendChild(state.minimizeBtn);
   }
 
-  state.canvas.addEventListener('mousedown', onCanvasMouseDown);
+  state.canvasMouseDownHandler = onCanvasMouseDown;
+  state.canvas.addEventListener('mousedown', state.canvasMouseDownHandler);
 
   state.documentMouseMoveHandler = e => {
     if (state.isDragging) {
@@ -270,10 +223,10 @@ export function setupCanvas() {
   };
   document.addEventListener('mouseup', state.documentMouseUpHandler);
 
-  state.canvas.addEventListener('mousemove', onCanvasMouseMove);
-  state.canvas.addEventListener('contextmenu', e => {
-    e.preventDefault();
-  });
+  state.canvasMouseMoveHandler = onCanvasMouseMove;
+  state.canvas.addEventListener('mousemove', state.canvasMouseMoveHandler);
+  state.canvasContextMenuHandler = e => { e.preventDefault(); };
+  state.canvas.addEventListener('contextmenu', state.canvasContextMenuHandler);
 }
 
 export function updateCanvasSize() {
