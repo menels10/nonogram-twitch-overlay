@@ -8,7 +8,7 @@ A draggable nonogram puzzle overlay for Twitch streams, complete with canvas ren
 
 🔍 Zoom controls (−, +, 1×)
 
-📋 "Export ✓" button automatically sends the command to twitch 
+📋 "Export ✓" button sends or copies the next 20 selected cells (`!fill` and `!empty` combined) — choose "Send 20 cells to chat" or "Copy 20 cells to clipboard" in ⚙️ Config. Each click moves on to the following block. Enable "Auto-send every 20 selected cells" to send automatically as soon as 20 cells are selected. "Reset export" forgets what was sent and queues the whole grid again.
 
 
 
@@ -49,7 +49,13 @@ Left-click on a cell: Toggle black fill (█). A second click clears it.
 
 Right-click: Toggle white mark (×). A second click clears it.
 
-"Export ✓": Copies all newly filled (black) cells as !fill a1 b2 c3 ... to your clipboard
+"Export ✓": Handles the next block of up to 20 newly filled/empty cells as `!fill a1 b2 ... !empty c3 ...`. In ⚙️ Config, choose whether a click **sends** that block to Twitch chat or **copies** it to the clipboard for manual pasting. Each click moves on to the following block.
+
+"Auto-send every 20 selected cells" (⚙️ Config): sends a chat message automatically as soon as 20 cells have been selected, without clicking Export.
+
+"Reset export": Clears the sent-cell history and queues the whole grid again, so Export can send/copy it from the first block.
+
+Changing grid size or column clue count clears the cells waiting to be sent.
 
 Zoom: Use − / + / 1× to adjust canvas scaling
 
@@ -67,7 +73,7 @@ Reset button to default layout (4x4 with 1 clue)
 🧹 Troubleshooting
 🖥️ No grid visible? Refresh the page, ensure you're on a matching URL (https://www.twitch.tv/goki*)
 
-📋 Export not working? Ensure browser permissions allow clipboard access
+📋 Export not working? Ensure you are logged into Twitch chat and the message delay has passed.
 
 
 Special thanks for mr_pantera666 for ideas and coding, 86 maylin for the several pulls and for kurotaku for making his own code available (https://github.com/Kurotaku-sama/Userscripts/) 
