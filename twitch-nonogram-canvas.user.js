@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.58
+// @version      4.59
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+86maylin+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -20,8 +20,8 @@
       fineTuningEnabled: false,
       sharpeningEnabled: false,
       autosendEnabled: false,
-      guardExport: false,
-      disableCooldown: false
+      exportAction: 'send',
+      guardExport: false
     };
 
   const state = {
@@ -39,6 +39,7 @@
     roiHeightPercent: 0.584,
     configs: {},
     autosendEnabled: false,
+    exportAction: 'send',
     canvas: null,
     ctx: null,
     frame: null,
@@ -48,6 +49,7 @@
     dragOffsetY: 0,
     lastExported: new Set(),
     lastExportedWhite: new Set(),
+    pendingCells: [],
     cellStates: [],
     hoveredRow: -1,
     hoveredCol: -1,
@@ -67,8 +69,7 @@
     sendQueue: [],
     sendLoopTimer: null,
     progressTimer: null,
-    exportFillBtn: null,
-    exportEmptyBtn: null,
+    exportBtn: null,
     exportDartBtn: null,
     statusAltCmd: false,
     rowDashes: [],
@@ -113,8 +114,8 @@
     state.fineTuningEnabled = state.uiConfig.fineTuningEnabled;
     state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
     state.guardExport = state.uiConfig.guardExport;
-    state.disableCooldown = state.uiConfig.disableCooldown;
     state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+    state.exportAction = state.uiConfig.exportAction === 'clipboard' ? 'clipboard' : 'send';
   }
 
   function saveUIConfig() {
@@ -228,6 +229,8 @@
     '20_8': { cellSize: 13.3, anchorX: 1.75, anchorY: 10 },
     '20_9': { cellSize: 13.3, anchorX: 1.5, anchorY: 10 },
     '20_10': { cellSize: 12, anchorX: 1.5, anchorY: 10 },
+    // Sizes 21-28 (auto-generated)
+    '21_1': { cellSize: 17.3, anchorX: 1.5, anchorY: 10 },
     '21_2': { cellSize: 17.29, anchorX: 1.5, anchorY: 10 },
     '21_3': { cellSize: 15.96, anchorX: 1.5, anchorY: 10 },
     '21_4': { cellSize: 15.94, anchorX: 1.5, anchorY: 10 },
@@ -238,6 +241,15 @@
     '21_9': { cellSize: 13.27, anchorX: 1.5, anchorY: 10 },
     '21_10': { cellSize: 11.97, anchorX: 1.5, anchorY: 10 },
     '21_11': { cellSize: 11.98, anchorX: 1.5, anchorY: 10 },
+    '21_12': { cellSize: 9.95, anchorX: 1.5, anchorY: 10 },
+    '21_13': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
+    '21_14': { cellSize: 8.65, anchorX: 1.5, anchorY: 10 },
+    '21_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '21_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
     '22_1': { cellSize: 15.95, anchorX: 1.5, anchorY: 10 },
     '22_2': { cellSize: 14.63, anchorX: 1.5, anchorY: 10 },
     '22_3': { cellSize: 14.64, anchorX: 1.5, anchorY: 10 },
@@ -249,6 +261,16 @@
     '22_9': { cellSize: 10.64, anchorX: 1.5, anchorY: 10 },
     '22_10': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
     '22_11': { cellSize: 9.29, anchorX: 1.5, anchorY: 10 },
+    '22_12': { cellSize: 9.5, anchorX: 1.5, anchorY: 10 },
+    '22_13': { cellSize: 8.85, anchorX: 1.5, anchorY: 10 },
+    '22_14': { cellSize: 8.25, anchorX: 1.5, anchorY: 10 },
+    '22_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '22_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
     '23_1': { cellSize: 14.63, anchorX: 1.5, anchorY: 10 },
     '23_2': { cellSize: 14.62, anchorX: 1.5, anchorY: 10 },
     '23_3': { cellSize: 13.29, anchorX: 1.5, anchorY: 10 },
@@ -261,6 +283,141 @@
     '23_10': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
     '23_11': { cellSize: 7.96, anchorX: 1.5, anchorY: 10 },
     '23_12': { cellSize: 7.97, anchorX: 1.5, anchorY: 10 },
+    '23_13': { cellSize: 8.5, anchorX: 1.5, anchorY: 10 },
+    '23_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '23_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_1': { cellSize: 15.1, anchorX: 1.5, anchorY: 10 },
+    '24_2': { cellSize: 15.1, anchorX: 1.5, anchorY: 10 },
+    '24_3': { cellSize: 14.35, anchorX: 1.5, anchorY: 10 },
+    '24_4': { cellSize: 13.9, anchorX: 1.5, anchorY: 10 },
+    '24_5': { cellSize: 13.5, anchorX: 1.5, anchorY: 10 },
+    '24_6': { cellSize: 12.4, anchorX: 1.5, anchorY: 10 },
+    '24_7': { cellSize: 12.25, anchorX: 1.5, anchorY: 10 },
+    '24_8': { cellSize: 10.8, anchorX: 1.5, anchorY: 10 },
+    '24_9': { cellSize: 10.8, anchorX: 1.5, anchorY: 10 },
+    '24_10': { cellSize: 9.85, anchorX: 1.5, anchorY: 10 },
+    '24_11': { cellSize: 9.3, anchorX: 1.5, anchorY: 10 },
+    '24_12': { cellSize: 8.7, anchorX: 1.5, anchorY: 10 },
+    '24_13': { cellSize: 8.1, anchorX: 1.5, anchorY: 10 },
+    '24_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '24_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_1': { cellSize: 14.5, anchorX: 1.5, anchorY: 10 },
+    '25_2': { cellSize: 14.5, anchorX: 1.5, anchorY: 10 },
+    '25_3': { cellSize: 13.8, anchorX: 1.5, anchorY: 10 },
+    '25_4': { cellSize: 13.4, anchorX: 1.5, anchorY: 10 },
+    '25_5': { cellSize: 13.05, anchorX: 1.5, anchorY: 10 },
+    '25_6': { cellSize: 11.95, anchorX: 1.5, anchorY: 10 },
+    '25_7': { cellSize: 11.85, anchorX: 1.5, anchorY: 10 },
+    '25_8': { cellSize: 10.3, anchorX: 1.5, anchorY: 10 },
+    '25_9': { cellSize: 10.3, anchorX: 1.5, anchorY: 10 },
+    '25_10': { cellSize: 9.45, anchorX: 1.5, anchorY: 10 },
+    '25_11': { cellSize: 8.9, anchorX: 1.5, anchorY: 10 },
+    '25_12': { cellSize: 8.35, anchorX: 1.5, anchorY: 10 },
+    '25_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '25_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_1': { cellSize: 13.95, anchorX: 1.5, anchorY: 10 },
+    '26_2': { cellSize: 13.95, anchorX: 1.5, anchorY: 10 },
+    '26_3': { cellSize: 13.3, anchorX: 1.5, anchorY: 10 },
+    '26_4': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '26_5': { cellSize: 12.6, anchorX: 1.5, anchorY: 10 },
+    '26_6': { cellSize: 11.5, anchorX: 1.5, anchorY: 10 },
+    '26_7': { cellSize: 11.45, anchorX: 1.5, anchorY: 10 },
+    '26_8': { cellSize: 9.8, anchorX: 1.5, anchorY: 10 },
+    '26_9': { cellSize: 9.8, anchorX: 1.5, anchorY: 10 },
+    '26_10': { cellSize: 9.1, anchorX: 1.5, anchorY: 10 },
+    '26_11': { cellSize: 8.55, anchorX: 1.5, anchorY: 10 },
+    '26_12': { cellSize: 8.05, anchorX: 1.5, anchorY: 10 },
+    '26_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '26_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_1': { cellSize: 13.45, anchorX: 1.5, anchorY: 10 },
+    '27_2': { cellSize: 13.45, anchorX: 1.5, anchorY: 10 },
+    '27_3': { cellSize: 12.85, anchorX: 1.5, anchorY: 10 },
+    '27_4': { cellSize: 12.5, anchorX: 1.5, anchorY: 10 },
+    '27_5': { cellSize: 12.2, anchorX: 1.5, anchorY: 10 },
+    '27_6': { cellSize: 11.05, anchorX: 1.5, anchorY: 10 },
+    '27_7': { cellSize: 11.05, anchorX: 1.5, anchorY: 10 },
+    '27_8': { cellSize: 9.35, anchorX: 1.5, anchorY: 10 },
+    '27_9': { cellSize: 9.35, anchorX: 1.5, anchorY: 10 },
+    '27_10': { cellSize: 8.75, anchorX: 1.5, anchorY: 10 },
+    '27_11': { cellSize: 8.25, anchorX: 1.5, anchorY: 10 },
+    '27_12': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '27_26': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_1': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '28_2': { cellSize: 12.95, anchorX: 1.5, anchorY: 10 },
+    '28_3': { cellSize: 12.4, anchorX: 1.5, anchorY: 10 },
+    '28_4': { cellSize: 12.1, anchorX: 1.5, anchorY: 10 },
+    '28_5': { cellSize: 11.8, anchorX: 1.5, anchorY: 10 },
+    '28_6': { cellSize: 10.7, anchorX: 1.5, anchorY: 10 },
+    '28_7': { cellSize: 10.7, anchorX: 1.5, anchorY: 10 },
+    '28_8': { cellSize: 8.95, anchorX: 1.5, anchorY: 10 },
+    '28_9': { cellSize: 8.95, anchorX: 1.5, anchorY: 10 },
+    '28_10': { cellSize: 8.45, anchorX: 1.5, anchorY: 10 },
+    '28_11': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_12': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_13': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_14': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_15': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_16': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_17': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_18': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_19': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_20': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_21': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_22': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_23': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_24': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_25': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_26': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
+    '28_27': { cellSize: 8.0, anchorX: 1.5, anchorY: 10 },
   };
 
   const statusRegions = [
@@ -379,6 +536,14 @@
     ensureProgressLoop();
   }
 
+  function clearSendQueue() {
+    state.sendQueue.length = 0;
+    if (state.sendLoopTimer) {
+      clearInterval(state.sendLoopTimer);
+      state.sendLoopTimer = null;
+    }
+  }
+
   function ensureSendLoop() {
     if (state.sendLoopTimer) return;
     state.sendLoopTimer = setInterval(() => {
@@ -390,10 +555,7 @@
         } catch (e) {
           console.error(e);
         }
-          if (state.disableCooldown)
-          {state.nextSendAt = now + 500;}
-          else
-          {state.nextSendAt = now + state.COOLDOWN_MS;}
+        state.nextSendAt = now + state.COOLDOWN_MS;
       }
       if (state.sendQueue.length === 0 && now >= state.nextSendAt) {
         clearInterval(state.sendLoopTimer);
@@ -412,8 +574,13 @@
       clearInterval(state.progressTimer);
       state.progressTimer = null;
     }
-    setBtnProgress(state.exportFillBtn, null);
-    setBtnProgress(state.exportEmptyBtn, null);
+    setBtnProgress(state.exportBtn, null);
+    [state.exportBtn, state.exportDartBtn].forEach(btn => {
+      if (!btn) return;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+    });
   }
 
   function cooldownProgress01() {
@@ -423,26 +590,28 @@
   }
 
   function updateCooldownUI() {
-    if (!state.autosendEnabled || (!state.exportFillBtn && !state.exportEmptyBtn)) return;
+    if (!state.exportBtn && !state.exportDartBtn) return;
     const now = Date.now();
     const p = cooldownProgress01();
     const ready = now >= state.nextSendAt && state.sendQueue.length === 0;
-    [state.exportFillBtn, state.exportEmptyBtn, state.exportDartBtn].forEach(btn => {
+    [state.exportBtn, state.exportDartBtn].forEach(btn => {
       if (!btn) return;
       btn.disabled = !ready;
       btn.style.opacity = ready ? '1' : '0.7';
       btn.style.cursor = ready ? 'pointer' : 'not-allowed';
     });
-    setBtnProgress(state.exportFillBtn, p);
-    setBtnProgress(state.exportEmptyBtn, p);
+    setBtnProgress(state.exportBtn, p);
 
     const remain = Math.max(0, state.nextSendAt - now);
     const seconds = Math.ceil(remain / 1000);
     const title = remain > 0 ? `Cooldown: ${seconds}s` : (state.sendQueue.length ? `Queued: ${state.sendQueue.length}` : 'Ready');
-    if (state.exportFillBtn) state.exportFillBtn.title = title;
-    if (state.exportEmptyBtn) state.exportEmptyBtn.title = title;
+    if (state.exportBtn) {
+      const base = state.exportBtn.dataset.baseTitle;
+      state.exportBtn.title = base ? `${title} — ${base}` : title;
+    }
+    if (state.exportDartBtn) state.exportDartBtn.title = title;
 
-    if (!state.autosendEnabled || (state.sendQueue.length === 0 && now >= state.nextSendAt)) {
+    if (state.sendQueue.length === 0 && now >= state.nextSendAt) {
       stopProgressLoop();
     }
   }
@@ -527,12 +696,6 @@
 
     return fn(...args);
   }
-
-    async function disableCooldown(fn, ...args) {
-         if (!state.disableCooldown) {
-      return fn(...args);
-    }
-    }
 
   function findPanelButton() {
     return document.querySelector('button[aria-label="Bits and Points Balances"]') ||
@@ -627,9 +790,15 @@
   const CELL_EMPTY = 0;
   const CELL_FILLED = 1;
   const CELL_MARKED = 2;
+  // run_540p.py accepts at most 20 cells per chat message (fill + empty combined).
+  const MAX_CELLS_PER_MESSAGE = 20;
 
   function colLetter(index) {
     return COL_LETTERS[index];
+  }
+
+  function coordFor(row, col) {
+    return `${colLetter(col)}${row + 1}`;
   }
 
   function safeClipboardWrite(text) {
@@ -649,9 +818,12 @@
     state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(CELL_EMPTY));
     state.lastExported = new Set();
     state.lastExportedWhite = new Set();
+    state.pendingCells = [];
+    clearSendQueue();
     state.geometryCache = null;
     state.dirtyGrid = true;
     resetClueDashes();
+    refreshExportButton();
   }
 
   function clamp(v, min, max) {
@@ -774,100 +946,135 @@
     });
   }
 
-  function exportCellsInner() {
-    const coords = [];
-    state.cellStates.forEach((row, r) => {
-      row.forEach((s, c) => {
-          if (s === 1) {
-            const coord = `${colLetter(c)}${r + 1}`;
-            if (!state.lastExported.has(coord)) {
-              coords.push(coord);
-              state.lastExported.add(coord);
-          }
-        }
-      });
-    });
-      if (coords.length) {
-        const msg = `!fill ${coords.join(' ')}`;
-        if (state.autosendEnabled) {
-          scheduleSend(msg);
-        } else {
-          safeClipboardWrite(msg);
-        }
-      }
+  function sentValueFor(coord) {
+    if (state.lastExported.has(coord)) return CELL_FILLED;
+    if (state.lastExportedWhite.has(coord)) return CELL_MARKED;
+    return CELL_EMPTY;
   }
 
-  function exportAllCellsInner(mode = 'black') {
+  function markCellSent(coord, value) {
+    if (value === CELL_FILLED) {
+      state.lastExportedWhite.delete(coord);
+      state.lastExported.add(coord);
+    } else {
+      state.lastExported.delete(coord);
+      state.lastExportedWhite.add(coord);
+    }
+  }
+
+  function pendingIndex(coord) {
+    return state.pendingCells.findIndex(cell => cell.coord === coord);
+  }
+
+  function refreshExportButton() {
+    const btn = state.exportBtn;
+    if (!btn) return;
+    const waiting = state.pendingCells.length ? ` — ${state.pendingCells.length} waiting` : '';
+    const verb = state.exportAction === 'clipboard' ? 'Copies' : 'Sends';
+    const auto = state.autosendEnabled
+      ? `Auto-sends every ${MAX_CELLS_PER_MESSAGE} selected cells. `
+      : '';
+    btn.dataset.baseTitle = `${auto}${verb} up to ${MAX_CELLS_PER_MESSAGE} cells per click${waiting}`;
+    btn.title = btn.dataset.baseTitle;
+  }
+
+  function queueCell(row, col, value) {
+    const coord = coordFor(row, col);
+    const idx = pendingIndex(coord);
+    if (value === CELL_EMPTY) {
+      // Erasing an unsent cell just removes it from the outgoing list.
+      if (idx !== -1) state.pendingCells.splice(idx, 1);
+      return;
+    }
+    if (sentValueFor(coord) === value) {
+      if (idx !== -1) state.pendingCells.splice(idx, 1);
+      return;
+    }
+    if (idx !== -1) {
+      state.pendingCells[idx].value = value;
+    } else {
+      state.pendingCells.push({ coord, value });
+    }
+    maybeAutoSend();
+  }
+
+  function buildCellMessage(cells) {
+    const fills = [];
+    const empties = [];
+    cells.forEach(({ coord, value }) => {
+      if (value === CELL_FILLED) fills.push(coord);
+      else if (value === CELL_MARKED) empties.push(coord);
+    });
+    const parts = [];
+    if (fills.length) parts.push(`!fill ${fills.join(' ')}`);
+    if (empties.length) parts.push(`!empty ${empties.join(' ')}`);
+    return parts.join(' ');
+  }
+
+  function sendCellBlocks(cells) {
+    if (!cells.length) return Promise.resolve();
+    const messages = [];
+    for (let i = 0; i < cells.length; i += MAX_CELLS_PER_MESSAGE) {
+      const chunk = cells.slice(i, i + MAX_CELLS_PER_MESSAGE);
+      const msg = buildCellMessage(chunk);
+      if (!msg) continue;
+      messages.push(msg);
+      chunk.forEach(({ coord, value }) => markCellSent(coord, value));
+    }
+    if (!messages.length) return Promise.resolve();
+    return guardedExport(() => {
+      messages.forEach(msg => scheduleSend(msg));
+    }).catch(error => console.error('Failed to send cell message:', error));
+  }
+
+  // Called whenever a cell changes: queues it and, with auto-send on, sends a
+  // message as soon as MAX_CELLS_PER_MESSAGE cells are waiting.
+  function maybeAutoSend() {
+    refreshExportButton();
+    if (!state.autosendEnabled) return;
+    if (state.pendingCells.length < MAX_CELLS_PER_MESSAGE) return;
+    const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+    sendCellBlocks(cells);
+    refreshExportButton();
+  }
+
+  // Unified export button: acts on the next block of MAX_CELLS_PER_MESSAGE cells
+  // only. Each click moves on to the following block ("send" mode posts it to
+  // chat, "clipboard" mode copies it so it can be pasted manually).
+  function exportPendingCells() {
+    if (!state.pendingCells.length) return Promise.resolve();
+    const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+    refreshExportButton();
+    if (state.exportAction === 'clipboard') {
+      const msg = buildCellMessage(cells);
+      if (!msg) return Promise.resolve();
+      cells.forEach(({ coord, value }) => markCellSent(coord, value));
+      return guardedExport(() => safeClipboardWrite(msg))
+        .catch(error => console.error('Failed to copy cell message:', error));
+    }
+    return sendCellBlocks(cells);
+  }
+
+  // "Reset export": forget what was sent and queue the whole grid again. With
+  // auto-send on it is sent in blocks of MAX_CELLS_PER_MESSAGE right away;
+  // otherwise the Export button sends/copies one block per click.
+  function resetExport() {
     state.lastExported.clear();
     state.lastExportedWhite.clear();
-
-    const coords = [];
-    if (mode === 'black') {
-      state.cellStates.forEach((row, r) => {
-        row.forEach((s, c) => {
-          if (s === 1) {
-            const coord = `${colLetter(c)}${r + 1}`;
-            coords.push(coord);
-            state.lastExported.add(coord);
-          }
-        });
-      });
-      if (coords.length) {
-        const msg = `!fill ${coords.join(' ')}`;
-        if (state.autosendEnabled) scheduleSend(msg);
-        else safeClipboardWrite(msg);
-      }
-    } else if (mode === 'white') {
-      state.cellStates.forEach((row, r) => {
-        row.forEach((s, c) => {
-          if (s === CELL_MARKED) {
-            const coord = `${colLetter(c)}${r + 1}`;
-            coords.push(coord);
-            state.lastExportedWhite.add(coord);
-          }
-        });
-      });
-      if (coords.length) {
-        const msg = `!empty ${coords.join(' ')}`;
-        if (state.autosendEnabled) scheduleSend(msg);
-        else safeClipboardWrite(msg);
-      }
-    }
-  }
-
-  function exportWhiteCellsInner() {
-    const coords = [];
+    state.pendingCells = [];
+    const cells = [];
     state.cellStates.forEach((row, r) => {
       row.forEach((s, c) => {
-        if (s === 2) {
-          const coord = `${colLetter(c)}${r + 1}`;
-          if (!state.lastExportedWhite.has(coord)) {
-            coords.push(coord);
-            state.lastExportedWhite.add(coord);
-          }
-        }
+        if (s === CELL_FILLED) cells.push({ coord: coordFor(r, c), value: CELL_FILLED });
+        else if (s === CELL_MARKED) cells.push({ coord: coordFor(r, c), value: CELL_MARKED });
       });
     });
-    if (coords.length) {
-      const msg = `!empty ${coords.join(' ')}`;
-      if (state.autosendEnabled) {
-        scheduleSend(msg);
-      } else {
-        safeClipboardWrite(msg);
-      }
-    }
-  }
-
-  function exportCells() {
-    return guardedExport(exportCellsInner);
-  }
-
-  function exportAllCells(mode) {
-    return guardedExport(exportAllCellsInner, mode);
-  }
-
-  function exportWhiteCells() {
-    return guardedExport(exportWhiteCellsInner);
+    state.pendingCells = cells;
+    refreshExportButton();
+    if (!state.autosendEnabled) return Promise.resolve();
+    state.pendingCells = [];
+    refreshExportButton();
+    return sendCellBlocks(cells);
   }
 
   function exportClearCommand() {
@@ -1008,6 +1215,7 @@
       const newValue = state.eraseMode ? CELL_EMPTY : state.markValue;
       state.cellStates[r][c] = newValue;
       state.currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
+      queueCell(r, c, newValue);
       createGrid();
     } else {
       state.isDragging = true;
@@ -1063,6 +1271,7 @@
           newValue: targetValue
         });
         state.cellStates[newRow][newCol] = targetValue;
+        queueCell(newRow, newCol, targetValue);
         cellChanged = true;
       }
     }
@@ -1076,11 +1285,17 @@
     if (!state.moveHistory.length) return;
     const lastAction = state.moveHistory.pop();
     lastAction.forEach(({ row, col, previous, newValue }) => {
-      const coord = `${colLetter(col)}${row + 1}`;
+      const coord = coordFor(row, col);
       if (newValue === CELL_FILLED) state.lastExported.delete(coord);
       if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
+      const idx = pendingIndex(coord);
+      if (idx !== -1) state.pendingCells.splice(idx, 1);
       state.cellStates[row][col] = previous;
+      if ((previous === CELL_FILLED || previous === CELL_MARKED) && sentValueFor(coord) !== previous) {
+        state.pendingCells.push({ coord, value: previous });
+      }
     });
+    refreshExportButton();
     createGrid();
   }
 
@@ -1173,6 +1388,37 @@
     wrapper.appendChild(checkbox);
     wrapper.appendChild(labelElement);
     return { wrapper, checkbox };
+  }
+
+  function createChoiceOption({ id, label, options, value, onChange, marginTop = '8px' }) {
+    const wrapper = document.createElement('div');
+    wrapper.style.marginTop = marginTop;
+
+    const title = document.createElement('div');
+    title.textContent = label;
+    wrapper.appendChild(title);
+
+    options.forEach(option => {
+      const row = document.createElement('label');
+      row.style.display = 'block';
+      row.style.cursor = 'pointer';
+
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = id;
+      radio.value = option.value;
+      radio.checked = option.value === value;
+      radio.style.marginRight = '6px';
+      radio.addEventListener('change', () => {
+        if (radio.checked) onChange(option.value);
+      });
+
+      row.appendChild(radio);
+      row.appendChild(document.createTextNode(option.label));
+      wrapper.appendChild(row);
+    });
+
+    return { wrapper };
   }
 
   function createMinimizeButton$1(onClick) {
@@ -1436,7 +1682,7 @@
     const { wrapper: autosendDiv } = createCheckboxOption({
       id: 'chk-autosend',
       checked: state.autosendEnabled,
-      label: 'Auto-send chat commands',
+      label: 'Auto-send every 20 selected cells',
       onChange: checked => {
         state.autosendEnabled = checked;
         state.uiConfig.autosendEnabled = state.autosendEnabled;
@@ -1447,6 +1693,23 @@
         } else {
           stopProgressLoop();
         }
+        maybeAutoSend();
+      }
+    });
+
+    const { wrapper: exportActionDiv } = createChoiceOption({
+      id: 'radio-export-action',
+      label: 'When I click Export:',
+      value: state.exportAction,
+      options: [
+        { value: 'send', label: 'Send 20 cells to chat' },
+        { value: 'clipboard', label: 'Copy 20 cells to clipboard' }
+      ],
+      onChange: value => {
+        state.exportAction = value;
+        state.uiConfig.exportAction = value;
+        saveUIConfig();
+        refreshExportButton();
       }
     });
 
@@ -1487,25 +1750,14 @@
       }
     });
 
-    const { wrapper: disableCooldownDiv } = createCheckboxOption({
-      id: 'chk-disable-cooldown',
-      checked: state.disableCooldown,
-      label: 'Disable cooldown',
-      onChange: checked => {
-        state.disableCooldown = checked;
-        state.uiConfig.disableCooldown = state.disableCooldown;
-        saveUIConfig();
-      }
-    });
-
     panel.appendChild(autosendDiv);
+    panel.appendChild(exportActionDiv);
     panel.appendChild(guardDiv);
     panel.appendChild(minDiv);
     panel.appendChild(blueDiv);
     panel.appendChild(statusDivToggle);
     panel.appendChild(fineDiv);
     panel.appendChild(sharpenDiv);
-    panel.appendChild(disableCooldownDiv);
 
     state.frame.appendChild(panel);
   }
@@ -1878,15 +2130,14 @@
       return btn;
     };
 
-    state.exportFillBtn = container.appendChild(makeBtn('Export !fill', exportCells));
-    state.exportEmptyBtn = container.appendChild(makeBtn('Export !empty', exportWhiteCells));
+    state.exportBtn = container.appendChild(makeBtn('Export ✓', exportPendingCells));
     container.appendChild(makeBtn('Undo', undoLastAction));
 
     const spacer = document.createElement('div');
     spacer.style.flex = '1';
     container.appendChild(spacer);
 
-    container.appendChild(makeBtn('reset export', exportAllCells));
+    container.appendChild(makeBtn('Reset export', resetExport));
     container.appendChild(makeBtn('Clean grid', cleanAll));
     container.appendChild(makeBtn('⚙️ Config', () => {
       toggleExtraConfigPanel();
@@ -1951,6 +2202,7 @@
     if (state.autosendEnabled) {
       ensureProgressLoop();
     }
+    refreshExportButton();
   }
 
   // Bootstraps the userscript, wires the grouped modules together, and handles cleanup.

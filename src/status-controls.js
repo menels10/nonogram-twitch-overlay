@@ -8,6 +8,8 @@ import {
   incrementCols,
   incrementFineTune,
   incrementSize,
+  maybeAutoSend,
+  refreshExportButton,
   resetSizeDefaults
 } from './nonogram-grid.js';
 import { ensureProgressLoop, ensureSendLoop, sendMessageWithEvent, stopProgressLoop } from './twitch-chat.js';
@@ -49,6 +51,37 @@ function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px' 
   wrapper.appendChild(checkbox);
   wrapper.appendChild(labelElement);
   return { wrapper, checkbox };
+}
+
+function createChoiceOption({ id, label, options, value, onChange, marginTop = '8px' }) {
+  const wrapper = document.createElement('div');
+  wrapper.style.marginTop = marginTop;
+
+  const title = document.createElement('div');
+  title.textContent = label;
+  wrapper.appendChild(title);
+
+  options.forEach(option => {
+    const row = document.createElement('label');
+    row.style.display = 'block';
+    row.style.cursor = 'pointer';
+
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = id;
+    radio.value = option.value;
+    radio.checked = option.value === value;
+    radio.style.marginRight = '6px';
+    radio.addEventListener('change', () => {
+      if (radio.checked) onChange(option.value);
+    });
+
+    row.appendChild(radio);
+    row.appendChild(document.createTextNode(option.label));
+    wrapper.appendChild(row);
+  });
+
+  return { wrapper };
 }
 
 function createMinimizeButton(onClick) {
@@ -319,7 +352,7 @@ export function createExtraConfigPanel() {
   const { wrapper: autosendDiv } = createCheckboxOption({
     id: 'chk-autosend',
     checked: state.autosendEnabled,
-    label: 'Auto-send chat commands',
+    label: 'Auto-send every 20 selected cells',
     onChange: checked => {
       state.autosendEnabled = checked;
       state.uiConfig.autosendEnabled = state.autosendEnabled;
@@ -330,6 +363,23 @@ export function createExtraConfigPanel() {
       } else {
         stopProgressLoop();
       }
+      maybeAutoSend();
+    }
+  });
+
+  const { wrapper: exportActionDiv } = createChoiceOption({
+    id: 'radio-export-action',
+    label: 'When I click Export:',
+    value: state.exportAction,
+    options: [
+      { value: 'send', label: 'Send 20 cells to chat' },
+      { value: 'clipboard', label: 'Copy 20 cells to clipboard' }
+    ],
+    onChange: value => {
+      state.exportAction = value;
+      state.uiConfig.exportAction = value;
+      saveUIConfig();
+      refreshExportButton();
     }
   });
 
@@ -371,6 +421,7 @@ export function createExtraConfigPanel() {
   });
 
   panel.appendChild(autosendDiv);
+  panel.appendChild(exportActionDiv);
   panel.appendChild(guardDiv);
   panel.appendChild(minDiv);
   panel.appendChild(blueDiv);

@@ -56,6 +56,14 @@ export function scheduleSend(msg) {
   ensureProgressLoop();
 }
 
+export function clearSendQueue() {
+  state.sendQueue.length = 0;
+  if (state.sendLoopTimer) {
+    clearInterval(state.sendLoopTimer);
+    state.sendLoopTimer = null;
+  }
+}
+
 export function ensureSendLoop() {
   if (state.sendLoopTimer) return;
   state.sendLoopTimer = setInterval(() => {
@@ -86,8 +94,13 @@ export function stopProgressLoop() {
     clearInterval(state.progressTimer);
     state.progressTimer = null;
   }
-  setBtnProgress(state.exportFillBtn, null);
-  setBtnProgress(state.exportEmptyBtn, null);
+  setBtnProgress(state.exportBtn, null);
+  [state.exportBtn, state.exportDartBtn].forEach(btn => {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+  });
 }
 
 function cooldownProgress01() {
@@ -97,26 +110,28 @@ function cooldownProgress01() {
 }
 
 export function updateCooldownUI() {
-  if (!state.autosendEnabled || (!state.exportFillBtn && !state.exportEmptyBtn)) return;
+  if (!state.exportBtn && !state.exportDartBtn) return;
   const now = Date.now();
   const p = cooldownProgress01();
   const ready = now >= state.nextSendAt && state.sendQueue.length === 0;
-  [state.exportFillBtn, state.exportEmptyBtn, state.exportDartBtn].forEach(btn => {
+  [state.exportBtn, state.exportDartBtn].forEach(btn => {
     if (!btn) return;
     btn.disabled = !ready;
     btn.style.opacity = ready ? '1' : '0.7';
     btn.style.cursor = ready ? 'pointer' : 'not-allowed';
   });
-  setBtnProgress(state.exportFillBtn, p);
-  setBtnProgress(state.exportEmptyBtn, p);
+  setBtnProgress(state.exportBtn, p);
 
   const remain = Math.max(0, state.nextSendAt - now);
   const seconds = Math.ceil(remain / 1000);
   const title = remain > 0 ? `Cooldown: ${seconds}s` : (state.sendQueue.length ? `Queued: ${state.sendQueue.length}` : 'Ready');
-  if (state.exportFillBtn) state.exportFillBtn.title = title;
-  if (state.exportEmptyBtn) state.exportEmptyBtn.title = title;
+  if (state.exportBtn) {
+    const base = state.exportBtn.dataset.baseTitle;
+    state.exportBtn.title = base ? `${title} — ${base}` : title;
+  }
+  if (state.exportDartBtn) state.exportDartBtn.title = title;
 
-  if (!state.autosendEnabled || (state.sendQueue.length === 0 && now >= state.nextSendAt)) {
+  if (state.sendQueue.length === 0 && now >= state.nextSendAt) {
     stopProgressLoop();
   }
 }

@@ -1,6 +1,6 @@
 // Manages the overlay frame, canvas rendering, ROI capture, and main action buttons.
 import { clearRenderHandle, state } from './state.js';
-import { createGrid, exportAllCells, exportCells, exportWhiteCells, onCanvasMouseDown, onCanvasMouseMove, undoLastAction, cleanAll } from './nonogram-grid.js';
+import { cleanAll, createGrid, exportPendingCells, onCanvasMouseDown, onCanvasMouseMove, refreshExportButton, resetExport, undoLastAction } from './nonogram-grid.js';
 import { toggleExtraConfigPanel } from './status-controls.js';
 import { ensureProgressLoop } from './twitch-chat.js';
 import { minutesSinceRedeem, redeemAndTrack } from './twitch-redeem.js';
@@ -293,15 +293,14 @@ export function createMainButtons() {
     return btn;
   };
 
-  state.exportFillBtn = container.appendChild(makeBtn('Export !fill', exportCells));
-  state.exportEmptyBtn = container.appendChild(makeBtn('Export !empty', exportWhiteCells));
+  state.exportBtn = container.appendChild(makeBtn('Export ✓', exportPendingCells));
   container.appendChild(makeBtn('Undo', undoLastAction));
 
   const spacer = document.createElement('div');
   spacer.style.flex = '1';
   container.appendChild(spacer);
 
-  container.appendChild(makeBtn('reset export', exportAllCells));
+  container.appendChild(makeBtn('Reset export', resetExport));
   container.appendChild(makeBtn('Clean grid', cleanAll));
   container.appendChild(makeBtn('⚙️ Config', () => {
     toggleExtraConfigPanel();
@@ -366,4 +365,5 @@ export function createMainButtons() {
   if (state.autosendEnabled) {
     ensureProgressLoop();
   }
+  refreshExportButton();
 }

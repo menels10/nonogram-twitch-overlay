@@ -1,6 +1,6 @@
 // Owns nonogram state, geometry, drawing, exports, and canvas interaction logic.
 import { getLayoutSettings, loadLayout, saveLayout, state } from './state.js';
-import { scheduleSend } from './twitch-chat.js';
+import { clearSendQueue, scheduleSend } from './twitch-chat.js';
 import { guardedExport } from './twitch-redeem.js';
 
 let updateCanvasSizeRef;
@@ -9,9 +9,15 @@ const COL_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const CELL_EMPTY = 0;
 const CELL_FILLED = 1;
 const CELL_MARKED = 2;
+// run_540p.py accepts at most 20 cells per chat message (fill + empty combined).
+const MAX_CELLS_PER_MESSAGE = 20;
 
 function colLetter(index) {
   return COL_LETTERS[index];
+}
+
+function coordFor(row, col) {
+  return `${colLetter(col)}${row + 1}`;
 }
 
 function safeClipboardWrite(text) {
@@ -31,9 +37,12 @@ export function initCells() {
   state.cellStates = Array.from({ length: state.size }, () => Array(state.size).fill(CELL_EMPTY));
   state.lastExported = new Set();
   state.lastExportedWhite = new Set();
+  state.pendingCells = [];
+  clearSendQueue();
   state.geometryCache = null;
   state.dirtyGrid = true;
   resetClueDashes();
+  refreshExportButton();
 }
 
 function clamp(v, min, max) {
@@ -156,100 +165,135 @@ export async function cleanAll() {
   });
 }
 
-function exportCellsInner() {
-  const coords = [];
-  state.cellStates.forEach((row, r) => {
-    row.forEach((s, c) => {
-        if (s === 1) {
-          const coord = `${colLetter(c)}${r + 1}`;
-          if (!state.lastExported.has(coord)) {
-            coords.push(coord);
-            state.lastExported.add(coord);
-        }
-      }
-    });
-  });
-    if (coords.length) {
-      const msg = `!fill ${coords.join(' ')}`;
-      if (state.autosendEnabled) {
-        scheduleSend(msg);
-      } else {
-        safeClipboardWrite(msg);
-      }
-    }
+function sentValueFor(coord) {
+  if (state.lastExported.has(coord)) return CELL_FILLED;
+  if (state.lastExportedWhite.has(coord)) return CELL_MARKED;
+  return CELL_EMPTY;
 }
 
-function exportAllCellsInner(mode = 'black') {
+function markCellSent(coord, value) {
+  if (value === CELL_FILLED) {
+    state.lastExportedWhite.delete(coord);
+    state.lastExported.add(coord);
+  } else {
+    state.lastExported.delete(coord);
+    state.lastExportedWhite.add(coord);
+  }
+}
+
+function pendingIndex(coord) {
+  return state.pendingCells.findIndex(cell => cell.coord === coord);
+}
+
+export function refreshExportButton() {
+  const btn = state.exportBtn;
+  if (!btn) return;
+  const waiting = state.pendingCells.length ? ` — ${state.pendingCells.length} waiting` : '';
+  const verb = state.exportAction === 'clipboard' ? 'Copies' : 'Sends';
+  const auto = state.autosendEnabled
+    ? `Auto-sends every ${MAX_CELLS_PER_MESSAGE} selected cells. `
+    : '';
+  btn.dataset.baseTitle = `${auto}${verb} up to ${MAX_CELLS_PER_MESSAGE} cells per click${waiting}`;
+  btn.title = btn.dataset.baseTitle;
+}
+
+export function queueCell(row, col, value) {
+  const coord = coordFor(row, col);
+  const idx = pendingIndex(coord);
+  if (value === CELL_EMPTY) {
+    // Erasing an unsent cell just removes it from the outgoing list.
+    if (idx !== -1) state.pendingCells.splice(idx, 1);
+    return;
+  }
+  if (sentValueFor(coord) === value) {
+    if (idx !== -1) state.pendingCells.splice(idx, 1);
+    return;
+  }
+  if (idx !== -1) {
+    state.pendingCells[idx].value = value;
+  } else {
+    state.pendingCells.push({ coord, value });
+  }
+  maybeAutoSend();
+}
+
+function buildCellMessage(cells) {
+  const fills = [];
+  const empties = [];
+  cells.forEach(({ coord, value }) => {
+    if (value === CELL_FILLED) fills.push(coord);
+    else if (value === CELL_MARKED) empties.push(coord);
+  });
+  const parts = [];
+  if (fills.length) parts.push(`!fill ${fills.join(' ')}`);
+  if (empties.length) parts.push(`!empty ${empties.join(' ')}`);
+  return parts.join(' ');
+}
+
+function sendCellBlocks(cells) {
+  if (!cells.length) return Promise.resolve();
+  const messages = [];
+  for (let i = 0; i < cells.length; i += MAX_CELLS_PER_MESSAGE) {
+    const chunk = cells.slice(i, i + MAX_CELLS_PER_MESSAGE);
+    const msg = buildCellMessage(chunk);
+    if (!msg) continue;
+    messages.push(msg);
+    chunk.forEach(({ coord, value }) => markCellSent(coord, value));
+  }
+  if (!messages.length) return Promise.resolve();
+  return guardedExport(() => {
+    messages.forEach(msg => scheduleSend(msg));
+  }).catch(error => console.error('Failed to send cell message:', error));
+}
+
+// Called whenever a cell changes: queues it and, with auto-send on, sends a
+// message as soon as MAX_CELLS_PER_MESSAGE cells are waiting.
+export function maybeAutoSend() {
+  refreshExportButton();
+  if (!state.autosendEnabled) return;
+  if (state.pendingCells.length < MAX_CELLS_PER_MESSAGE) return;
+  const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+  sendCellBlocks(cells);
+  refreshExportButton();
+}
+
+// Unified export button: acts on the next block of MAX_CELLS_PER_MESSAGE cells
+// only. Each click moves on to the following block ("send" mode posts it to
+// chat, "clipboard" mode copies it so it can be pasted manually).
+export function exportPendingCells() {
+  if (!state.pendingCells.length) return Promise.resolve();
+  const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+  refreshExportButton();
+  if (state.exportAction === 'clipboard') {
+    const msg = buildCellMessage(cells);
+    if (!msg) return Promise.resolve();
+    cells.forEach(({ coord, value }) => markCellSent(coord, value));
+    return guardedExport(() => safeClipboardWrite(msg))
+      .catch(error => console.error('Failed to copy cell message:', error));
+  }
+  return sendCellBlocks(cells);
+}
+
+// "Reset export": forget what was sent and queue the whole grid again. With
+// auto-send on it is sent in blocks of MAX_CELLS_PER_MESSAGE right away;
+// otherwise the Export button sends/copies one block per click.
+export function resetExport() {
   state.lastExported.clear();
   state.lastExportedWhite.clear();
-
-  const coords = [];
-  if (mode === 'black') {
-    state.cellStates.forEach((row, r) => {
-      row.forEach((s, c) => {
-        if (s === 1) {
-          const coord = `${colLetter(c)}${r + 1}`;
-          coords.push(coord);
-          state.lastExported.add(coord);
-        }
-      });
-    });
-    if (coords.length) {
-      const msg = `!fill ${coords.join(' ')}`;
-      if (state.autosendEnabled) scheduleSend(msg);
-      else safeClipboardWrite(msg);
-    }
-  } else if (mode === 'white') {
-    state.cellStates.forEach((row, r) => {
-      row.forEach((s, c) => {
-        if (s === CELL_MARKED) {
-          const coord = `${colLetter(c)}${r + 1}`;
-          coords.push(coord);
-          state.lastExportedWhite.add(coord);
-        }
-      });
-    });
-    if (coords.length) {
-      const msg = `!empty ${coords.join(' ')}`;
-      if (state.autosendEnabled) scheduleSend(msg);
-      else safeClipboardWrite(msg);
-    }
-  }
-}
-
-function exportWhiteCellsInner() {
-  const coords = [];
+  state.pendingCells = [];
+  const cells = [];
   state.cellStates.forEach((row, r) => {
     row.forEach((s, c) => {
-      if (s === 2) {
-        const coord = `${colLetter(c)}${r + 1}`;
-        if (!state.lastExportedWhite.has(coord)) {
-          coords.push(coord);
-          state.lastExportedWhite.add(coord);
-        }
-      }
+      if (s === CELL_FILLED) cells.push({ coord: coordFor(r, c), value: CELL_FILLED });
+      else if (s === CELL_MARKED) cells.push({ coord: coordFor(r, c), value: CELL_MARKED });
     });
   });
-  if (coords.length) {
-    const msg = `!empty ${coords.join(' ')}`;
-    if (state.autosendEnabled) {
-      scheduleSend(msg);
-    } else {
-      safeClipboardWrite(msg);
-    }
-  }
-}
-
-export function exportCells() {
-  return guardedExport(exportCellsInner);
-}
-
-export function exportAllCells(mode) {
-  return guardedExport(exportAllCellsInner, mode);
-}
-
-export function exportWhiteCells() {
-  return guardedExport(exportWhiteCellsInner);
+  state.pendingCells = cells;
+  refreshExportButton();
+  if (!state.autosendEnabled) return Promise.resolve();
+  state.pendingCells = [];
+  refreshExportButton();
+  return sendCellBlocks(cells);
 }
 
 export function exportClearCommand() {
@@ -390,6 +434,7 @@ export function onCanvasMouseDown(e) {
     const newValue = state.eraseMode ? CELL_EMPTY : state.markValue;
     state.cellStates[r][c] = newValue;
     state.currentAction = [{ row: r, col: c, previous: prevValue, newValue }];
+    queueCell(r, c, newValue);
     createGrid();
   } else {
     state.isDragging = true;
@@ -445,6 +490,7 @@ export function onCanvasMouseMove(e) {
         newValue: targetValue
       });
       state.cellStates[newRow][newCol] = targetValue;
+      queueCell(newRow, newCol, targetValue);
       cellChanged = true;
     }
   }
@@ -458,11 +504,17 @@ export function undoLastAction() {
   if (!state.moveHistory.length) return;
   const lastAction = state.moveHistory.pop();
   lastAction.forEach(({ row, col, previous, newValue }) => {
-    const coord = `${colLetter(col)}${row + 1}`;
+    const coord = coordFor(row, col);
     if (newValue === CELL_FILLED) state.lastExported.delete(coord);
     if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
+    const idx = pendingIndex(coord);
+    if (idx !== -1) state.pendingCells.splice(idx, 1);
     state.cellStates[row][col] = previous;
+    if ((previous === CELL_FILLED || previous === CELL_MARKED) && sentValueFor(coord) !== previous) {
+      state.pendingCells.push({ coord, value: previous });
+    }
   });
+  refreshExportButton();
   createGrid();
 }
 
