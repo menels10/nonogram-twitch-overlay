@@ -8,7 +8,11 @@ A draggable nonogram puzzle overlay for Twitch streams, complete with canvas ren
 
 🔍 Zoom controls (−, +, 1×)
 
-📋 "Export ✓" button sends or copies the next 20 selected cells (`!fill` and `!empty` combined) — choose "Send 20 cells to chat" or "Copy 20 cells to clipboard" in ⚙️ Config. Each click moves on to the following block. Enable "Auto-send every 20 selected cells" to send automatically as soon as 20 cells are selected. "Reset export" forgets what was sent and queues the whole grid again.
+📋 "Export ✓" button sends or copies the next 15–24 selected cells (`!fill`, `!empty` and `!clear` combined) — the exact count is drawn at random for each message. Choose "Send 15–24 cells to chat" or "Copy 15–24 cells to clipboard" in ⚙️ Config. Each click moves on to the following block. Enable "Auto-send in blocks of 15–24 selected cells" to send automatically without clicking Export. "Reset export" forgets what was sent and queues the whole grid again.
+
+🏁 Finishing the grid sends the rest immediately. When the last untouched cell is filled or marked empty — the grid is then complete — whatever is still waiting goes out as a final message, even if it is far fewer than 15 cells (e.g. a 4×4 grid sends its 16 cells as one message). The bot gets the final cells right away instead of waiting for a block that will never fill.
+
+🧽 Erasing a cell that was already exported queues `!clear <cell>`, so the bot drops that cell instead of keeping the old mark. Every cell is exported with its latest state only: clearing a cell and then filling or emptying it again before the export sends just one entry, and if it ends up back at the state the bot already knows, nothing is sent for it.
 
 
 
@@ -49,13 +53,20 @@ Left-click on a cell: Toggle black fill (█). A second click clears it.
 
 Right-click: Toggle white mark (×). A second click clears it.
 
-"Export ✓": Handles the next block of up to 20 newly filled/empty cells as `!fill a1 b2 ... !empty c3 ...`. In ⚙️ Config, choose whether a click **sends** that block to Twitch chat or **copies** it to the clipboard for manual pasting. Each click moves on to the following block.
+"Export ✓": Handles the next block of 15–24 newly filled/empty cells as `!fill a1 b2 ... !empty c3 ...`. The block size is drawn at random for every message, so consecutive messages never repeat the same length. In ⚙️ Config, choose whether a click **sends** that block to Twitch chat or **copies** it to the clipboard for manual pasting. Each click moves on to the following block.
 
-"Auto-send every 20 selected cells" (⚙️ Config): sends a chat message automatically as soon as 20 cells have been selected, without clicking Export.
+"Auto-send in blocks of 15–24 selected cells" (⚙️ Config): sends a chat message automatically as soon as the current random block target is reached, without clicking Export.
 
 "Reset export": Clears the sent-cell history and queues the whole grid again, so Export can send/copy it from the first block.
 
 Changing grid size or column clue count clears the cells waiting to be sent.
+
+⏱️ Chat pacing and rate limits
+Messages are sent one at a time with a 10 second gap. A message only leaves the queue once Twitch did not reject it. If Twitch refuses it — slow mode ("This chat is running in slow mode. You’re sending messages too quickly.") or a plain "You are sending messages too quickly." — the same message stays at the front of the queue and is retried every 5 seconds until it goes through. Later coordinate blocks never jump ahead of it, and nothing has to be copied from chat by hand.
+
+Any other message you send yourself in chat — `!darts`, tamagotchi commands, anything typed or sent with the chat button — is detected and counts as the chat slot: it delays the nonogram queue for one cooldown but never queues, starts or flushes nonogram messages.
+
+While Twitch is blocking, the Export button tooltip shows `Twitch blocked the message — retry in Ns (N queued)`.
 
 Zoom: Use − / + / 1× to adjust canvas scaling
 
@@ -73,7 +84,7 @@ Reset button to default layout (4x4 with 1 clue)
 🧹 Troubleshooting
 🖥️ No grid visible? Refresh the page, ensure you're on a matching URL (https://www.twitch.tv/goki*)
 
-📋 Export not working? Ensure you are logged into Twitch chat and the message delay has passed.
+📋 Export not working? Ensure you are logged into Twitch chat and the message delay has passed. If Twitch rate-limits you, the queued blocks are retried automatically and the tooltip shows the remaining wait.
 
 
 Special thanks for mr_pantera666 for ideas and coding, 86 maylin for the several pulls and for kurotaku for making his own code available (https://github.com/Kurotaku-sama/Userscripts/) 

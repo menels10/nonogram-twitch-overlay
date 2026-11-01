@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Twitch Nonogram Grid with canvas
 // @namespace    http://tampermonkey.net/
-// @version      4.60
+// @version      4.69
 // @description  Nonogram overlay + status bars + persistent config
 // @author       mrpantera+menels+86maylin+a lot of chatgpt + kurotaku codes
 // @match        https://www.twitch.tv/goki*
@@ -67,6 +67,10 @@
     COOLDOWN_MS: 10_000,
     nextSendAt: 0,
     sendQueue: [],
+    inflightSend: null,
+    sendAttempts: 0,
+    chatBlockedUntil: 0,
+    lastExternalSendAt: 0,
     sendLoopTimer: null,
     progressTimer: null,
     exportBtn: null,
@@ -479,18 +483,54 @@
     state.renderHandle = null;
   }
 
-  // Integrates with Twitch chat, including message sending and autosend cooldown handling.
+  // Integrates with Twitch chat: paced queue, delivery confirmation, rate-limit
+  // recovery, and cooldown tracking shared by nonogram and dart messages.
+
+  // Twitch explains a rejected message as short text next to the chat input
+  // (or as a tooltip): "You are sending messages too quickly.",
+  // "This chat is running in slow mode. You’re sending messages too quickly.",
+  // "Your message was not sent ...". Only these concrete phrases count, so
+  // panels and chat lines cannot stall the queue.
+  const CHAT_ERROR_RE = /too frequent|too quickly|too fast|slow.?mode|message not sent|message was not sent/i;
+  // Places Twitch renders that notice, both inline and in tooltips/portals.
+  const CHAT_ERROR_SELECTORS = [
+    '[data-a-target="chat-input-error"]',
+    '[data-test-selector="chat-input-error"]',
+    '[role="alert"]',
+    '[role="tooltip"]',
+    '[data-a-target="tooltip-default"]'
+  ];
+  // How long to wait for an error before treating a message as delivered.
+  const SEND_CONFIRM_MS = 2500;
+  // A rejected message (slow mode / "sending messages too quickly") is retried
+  // at this fixed interval, for as long as it takes, without dropping it.
+  const RETRY_DELAY_MS = 5_000;
+  // Retry delay when the chat component could not be found at all.
+  const NO_CHAT_RETRY_MS = 5_000;
+
+  let chatWatchAttached = false;
 
   function sendMessageWithEvent(message) {
+    const chat = resolveChat();
+    if (!chat || !chat.props?.onSendMessage) {
+      console.error('Chat not available or missing onSendMessage. (Are you on a chat page and logged in?)');
+      return false;
+    }
+
+    try {
+      chat.props.onSendMessage(message);
+      return true;
+    } catch (error) {
+      console.error('Failed to send chat message:', error);
+      return false;
+    }
+  }
+
+  function resolveChat() {
     if (!state.currentChat || !state.currentChat.props?.onSendMessage) {
       state.currentChat = getCurrentChat();
     }
-
-    if (state.currentChat?.props?.onSendMessage) {
-      state.currentChat.props.onSendMessage(message);
-    } else {
-      console.error('Chat not available or missing onSendMessage. (Are you on a chat page and logged in?)');
-    }
+    return state.currentChat;
   }
 
   function getCurrentChat() {
@@ -530,7 +570,14 @@
     return searchReactParents(node.return, predicate, maxDepth, depth + 1);
   }
 
+  function truncate(text, max = 60) {
+    const value = String(text ?? '');
+    return value.length > max ? `${value.slice(0, max)}…` : value;
+  }
+
   function scheduleSend(msg) {
+    if (!msg) return;
+    ensureChatWatch();
     state.sendQueue.push(msg);
     ensureSendLoop();
     ensureProgressLoop();
@@ -538,6 +585,9 @@
 
   function clearSendQueue() {
     state.sendQueue.length = 0;
+    state.inflightSend = null;
+    state.sendAttempts = 0;
+    state.chatBlockedUntil = 0;
     if (state.sendLoopTimer) {
       clearInterval(state.sendLoopTimer);
       state.sendLoopTimer = null;
@@ -545,23 +595,9 @@
   }
 
   function ensureSendLoop() {
+    ensureChatWatch();
     if (state.sendLoopTimer) return;
-    state.sendLoopTimer = setInterval(() => {
-      const now = Date.now();
-      if (state.sendQueue.length > 0 && now >= state.nextSendAt) {
-        const next = state.sendQueue.shift();
-        try {
-          sendMessageWithEvent(next);
-        } catch (e) {
-          console.error(e);
-        }
-        state.nextSendAt = now + state.COOLDOWN_MS;
-      }
-      if (state.sendQueue.length === 0 && now >= state.nextSendAt) {
-        clearInterval(state.sendLoopTimer);
-        state.sendLoopTimer = null;
-      }
-    }, 250);
+    state.sendLoopTimer = setInterval(() => processSendQueue(), 250);
   }
 
   function ensureProgressLoop() {
@@ -583,17 +619,194 @@
     });
   }
 
-  function cooldownProgress01() {
-    const now = Date.now();
+  // One step of the send queue. Messages are only removed once Twitch did not
+  // answer with a rate-limit error, so a blocked block is retried instead of
+  // being dropped (and later blocks never overtake it).
+  function processSendQueue(now = Date.now()) {
+    const inflight = state.inflightSend;
+
+    if (inflight) {
+      if (chatShowsRateLimit()) {
+        failInflight(now);
+      } else if (now - inflight.at >= SEND_CONFIRM_MS) {
+        completeInflight(now);
+      }
+    }
+
+    if (!state.inflightSend && state.sendQueue.length && now >= state.nextSendAt) {
+      startSend(now);
+    }
+
+    if (!state.inflightSend && !state.sendQueue.length && now >= state.nextSendAt) {
+      if (state.sendLoopTimer) {
+        clearInterval(state.sendLoopTimer);
+        state.sendLoopTimer = null;
+      }
+    }
+
+    updateCooldownUI(now);
+  }
+
+  function startSend(now) {
+    const msg = state.sendQueue[0];
+    if (!sendMessageWithEvent(msg)) {
+      // Chat not found yet: keep the message queued and try again shortly.
+      state.nextSendAt = now + NO_CHAT_RETRY_MS;
+      return;
+    }
+    state.inflightSend = { msg, at: now };
+  }
+
+  function completeInflight(now) {
+    state.inflightSend = null;
+    if (state.sendQueue.length) state.sendQueue.shift();
+    state.sendAttempts = 0;
+    state.chatBlockedUntil = 0;
+    state.nextSendAt = now + state.COOLDOWN_MS;
+  }
+
+  function failInflight(now) {
+    const blocked = state.inflightSend?.msg;
+    state.inflightSend = null;
+    state.sendAttempts += 1;
+    state.nextSendAt = now + RETRY_DELAY_MS;
+    state.chatBlockedUntil = state.nextSendAt;
+    const log = state.sendAttempts === 1 ? console.warn : console.log;
+    log(
+      `[Nonogram] Twitch rejected "${truncate(blocked)}" (attempt ${state.sendAttempts}, ` +
+      `slow mode or rate limit); retrying in ${Math.round(RETRY_DELAY_MS / 1000)}s. Pending messages:`,
+      state.sendQueue
+    );
+  }
+
+  // Twitch renders its "too quickly" / slow mode notice as short text near the
+  // chat input, sometimes in a tooltip element. Any visible match blocks the
+  // queue; chat messages themselves are never considered.
+  function chatShowsRateLimit() {
+    for (const selector of CHAT_ERROR_SELECTORS) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (matchesChatError(el)) return true;
+      }
+    }
+
+    // Inline notice: look around the input field first (the usual place), then
+    // one and two levels further up in case it lives in a wrapper element.
+    const input = document.querySelector(
+      'section[data-test-selector="chat-room-component-layout"] textarea, ' +
+      'section[data-test-selector="chat-room-component-layout"] [contenteditable="true"], ' +
+      'section[data-test-selector="chat-room-component-layout"] [data-test-selector="chat-input"]'
+    );
+    let scope = input?.parentElement || null;
+    for (let depth = 0; scope && depth < 3; depth++) {
+      let scanned = 0;
+      for (const el of scope.querySelectorAll('p, span, div')) {
+        if (scanned++ > 300) break;
+        if (el.children.length) continue;
+        if (matchesChatError(el)) return true;
+      }
+      scope = scope.parentElement;
+    }
+
+    return false;
+  }
+
+  function matchesChatError(el) {
+    if (!el || el.isConnected === false) return false;
+    if (el.closest?.('[data-test-selector="chat-line-message"], [data-a-target="chat-line-message"]')) {
+      return false;
+    }
+    const text = (el.textContent || '').trim();
+    if (!text || text.length > 300) return false;
+    if (!CHAT_ERROR_RE.test(text)) return false;
+    return isVisible(el);
+  }
+
+  function isVisible(el) {
+    if (!el || el.isConnected === false) return false;
+    const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+    return !rect || rect.width > 0 || rect.height > 0;
+  }
+
+  function ensureChatWatch() {
+    if (chatWatchAttached) return;
+    chatWatchAttached = true;
+    document.addEventListener('keydown', handleChatKeydown, true);
+    document.addEventListener('click', handleChatClick, true);
+  }
+
+  function stopChatWatch() {
+    if (!chatWatchAttached) return;
+    chatWatchAttached = false;
+    document.removeEventListener('keydown', handleChatKeydown, true);
+    document.removeEventListener('click', handleChatClick, true);
+  }
+
+  function chatInputFrom(el) {
+    if (!el) return null;
+    const section = el.closest?.('section[data-test-selector="chat-room-component-layout"]');
+    if (!section) return null;
+    if (el.tagName === 'TEXTAREA' || el.isContentEditable === true) return el;
+    return null;
+  }
+
+  function inputText(el) {
+    if (!el) return '';
+    if (typeof el.value === 'string') return el.value.trim();
+    return (el.innerText || el.textContent || '').trim();
+  }
+
+  function findChatInput() {
+    return document.querySelector(
+      'section[data-test-selector="chat-room-component-layout"] textarea, ' +
+      'section[data-test-selector="chat-room-component-layout"] [contenteditable="true"]'
+    );
+  }
+
+  function handleChatKeydown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
+    const input = chatInputFrom(event.target);
+    if (!input) return;
+    const text = inputText(input);
+    if (!text) return;
+    noteExternalSend(text, Date.now());
+  }
+
+  function handleChatClick(event) {
+    const btn = event.target?.closest?.(
+      'button[data-a-target="chat-send-button"], [data-test-selector="chat-input-buttons"] button'
+    );
+    if (!btn) return;
+    const text = inputText(findChatInput());
+    if (!text) return;
+    noteExternalSend(text, Date.now());
+  }
+
+  // Any other message the user sends (darts, tamagotchi, manual commands) takes
+  // the chat slot: it only delays the nonogram queue, it never starts or drains it.
+  function noteExternalSend(text = '', now = Date.now()) {
+    state.lastExternalSendAt = now;
+    const until = now + state.COOLDOWN_MS;
+    if (until > state.nextSendAt) state.nextSendAt = until;
+
+    if (state.inflightSend || state.sendQueue.length) {
+      console.log(
+        `[Nonogram] Chat message "${truncate(text)}" sent outside the overlay — ` +
+        `waiting ${Math.round(state.COOLDOWN_MS / 1000)}s before the next queued message.`
+      );
+    }
+    updateCooldownUI(now);
+  }
+
+  function cooldownProgress01(now) {
     if (now < state.nextSendAt) return 1 - (state.nextSendAt - now) / state.COOLDOWN_MS;
     return 1;
   }
 
-  function updateCooldownUI() {
+  function updateCooldownUI(now = Date.now()) {
     if (!state.exportBtn && !state.exportDartBtn) return;
-    const now = Date.now();
-    const p = cooldownProgress01();
-    const ready = now >= state.nextSendAt && state.sendQueue.length === 0;
+    const p = cooldownProgress01(now);
+    const busy = !!state.inflightSend;
+    const ready = now >= state.nextSendAt && state.sendQueue.length === 0 && !busy;
     [state.exportBtn, state.exportDartBtn].forEach(btn => {
       if (!btn) return;
       btn.disabled = !ready;
@@ -604,15 +817,31 @@
 
     const remain = Math.max(0, state.nextSendAt - now);
     const seconds = Math.ceil(remain / 1000);
-    const title = remain > 0 ? `Cooldown: ${seconds}s` : (state.sendQueue.length ? `Queued: ${state.sendQueue.length}` : 'Ready');
+    let title;
+    if (state.chatBlockedUntil > now) {
+      title = `Twitch blocked the message — retry in ${seconds}s (${state.sendQueue.length} queued)`;
+    } else if (busy) {
+      title = 'Sending…';
+    } else if (remain > 0) {
+      title = `Cooldown: ${seconds}s`;
+    } else if (state.sendQueue.length) {
+      title = `Sending (${state.sendQueue.length} left)`;
+    } else {
+      title = 'Ready';
+    }
+
     if (state.exportBtn) {
       const base = state.exportBtn.dataset.baseTitle;
       state.exportBtn.title = base ? `${title} — ${base}` : title;
     }
     if (state.exportDartBtn) state.exportDartBtn.title = title;
 
-    if (state.sendQueue.length === 0 && now >= state.nextSendAt) {
+    if (state.sendQueue.length === 0 && !busy && now >= state.nextSendAt) {
       stopProgressLoop();
+    } else {
+      // Keeps the countdown running (and the buttons disabled) until the chat
+      // slot is free again, including cooldowns started by manual chat messages.
+      ensureProgressLoop();
     }
   }
 
@@ -790,8 +1019,46 @@
   const CELL_EMPTY = 0;
   const CELL_FILLED = 1;
   const CELL_MARKED = 2;
-  // run_540p.py accepts at most 20 cells per chat message (fill + empty combined).
-  const MAX_CELLS_PER_MESSAGE = 20;
+  // Outgoing-only value: the cell was already announced to the bot as filled or
+  // empty and has since been erased locally, so the bot needs "!clear <cell>".
+  // The bot counts cleared cells towards its per-message limit too.
+  const CELL_CLEAR = 3;
+  // run_540p.py accepts at most 25 cells per chat message (fill, empty and clear
+  // combined — cleared cells count towards the limit too). Each message carries a
+  // random number of cells in this range so blocks are never a fixed size.
+  const BLOCK_MIN = 15;
+  const BLOCK_MAX = 24;
+
+  // Message length for the next block: a random count in [BLOCK_MIN, BLOCK_MAX],
+  // so blocks are never a fixed size (20, 20, 20 …) and no two messages repeat the
+  // same shape.
+  function randomBlockSize() {
+    return BLOCK_MIN + Math.floor(Math.random() * (BLOCK_MAX - BLOCK_MIN + 1));
+  }
+
+  // With auto-send on, cells accumulate until this many are waiting; the target is
+  // re-drawn after every sent block, which is what keeps the sizes varied.
+  let autoBlockTarget = randomBlockSize();
+
+  function randomizeBlockTarget() {
+    autoBlockTarget = randomBlockSize();
+  }
+
+  // Splits a batch into consecutive messages of random length. Only used when the
+  // batch is bigger than one message (a whole-grid send, for instance) — a batch
+  // that already fits is sent as-is, never cut in two.
+  function chunkCells(cells) {
+    if (cells.length <= BLOCK_MAX) return [cells];
+    const chunks = [];
+    let i = 0;
+    while (i < cells.length) {
+      const remaining = cells.length - i;
+      const size = remaining <= BLOCK_MAX ? remaining : randomBlockSize();
+      chunks.push(cells.slice(i, i + size));
+      i += size;
+    }
+    return chunks;
+  }
 
   function colLetter(index) {
     return COL_LETTERS[index];
@@ -819,6 +1086,7 @@
     state.lastExported = new Set();
     state.lastExportedWhite = new Set();
     state.pendingCells = [];
+    randomizeBlockTarget();
     clearSendQueue();
     state.geometryCache = null;
     state.dirtyGrid = true;
@@ -956,14 +1224,41 @@
     if (value === CELL_FILLED) {
       state.lastExportedWhite.delete(coord);
       state.lastExported.add(coord);
-    } else {
-      state.lastExported.delete(coord);
-      state.lastExportedWhite.add(coord);
+      return;
     }
+    state.lastExported.delete(coord);
+    if (value === CELL_MARKED) state.lastExportedWhite.add(coord);
+    else state.lastExportedWhite.delete(coord); // CELL_CLEAR: bot now has it blank
   }
 
   function pendingIndex(coord) {
     return state.pendingCells.findIndex(cell => cell.coord === coord);
+  }
+
+  // Reconciles the outgoing entry for one cell with its new local state, so each
+  // cell is queued at most once and always with its latest value:
+  //  - same as what the bot already knows -> nothing to send;
+  //  - erased cell the bot knows as filled/empty -> outgoing "!clear";
+  //  - filled/marked -> outgoing !fill / !empty.
+  // A pending entry that changes state is overwritten in place, which is why a
+  // clear that is turned back into a fill/empty is only sent once (final state).
+  // Returns true when state.pendingCells changed.
+  function applyPending(coord, value) {
+    const idx = pendingIndex(coord);
+    const sent = sentValueFor(coord);
+    const outgoing = value === sent ? null : (value === CELL_EMPTY ? CELL_CLEAR : value);
+    if (outgoing === null) {
+      if (idx === -1) return false;
+      state.pendingCells.splice(idx, 1);
+      return true;
+    }
+    if (idx !== -1) {
+      if (state.pendingCells[idx].value === outgoing) return false;
+      state.pendingCells[idx].value = outgoing;
+      return true;
+    }
+    state.pendingCells.push({ coord, value: outgoing });
+    return true;
   }
 
   function refreshExportButton() {
@@ -972,78 +1267,89 @@
     const waiting = state.pendingCells.length ? ` — ${state.pendingCells.length} waiting` : '';
     const verb = state.exportAction === 'clipboard' ? 'Copies' : 'Sends';
     const auto = state.autosendEnabled
-      ? `Auto-sends every ${MAX_CELLS_PER_MESSAGE} selected cells. `
+      ? `Auto-sends in blocks of ${BLOCK_MIN}–${BLOCK_MAX} selected cells. `
       : '';
-    btn.dataset.baseTitle = `${auto}${verb} up to ${MAX_CELLS_PER_MESSAGE} cells per click${waiting}`;
+    btn.dataset.baseTitle = `${auto}${verb} ${BLOCK_MIN}–${BLOCK_MAX} cells per click${waiting}`;
     btn.title = btn.dataset.baseTitle;
   }
 
   function queueCell(row, col, value) {
-    const coord = coordFor(row, col);
-    const idx = pendingIndex(coord);
-    if (value === CELL_EMPTY) {
-      // Erasing an unsent cell just removes it from the outgoing list.
-      if (idx !== -1) state.pendingCells.splice(idx, 1);
-      return;
-    }
-    if (sentValueFor(coord) === value) {
-      if (idx !== -1) state.pendingCells.splice(idx, 1);
-      return;
-    }
-    if (idx !== -1) {
-      state.pendingCells[idx].value = value;
-    } else {
-      state.pendingCells.push({ coord, value });
-    }
+    applyPending(coordFor(row, col), value);
+    // Also refreshes the "waiting" count on the button.
     maybeAutoSend();
   }
 
   function buildCellMessage(cells) {
     const fills = [];
     const empties = [];
+    const clears = [];
     cells.forEach(({ coord, value }) => {
       if (value === CELL_FILLED) fills.push(coord);
       else if (value === CELL_MARKED) empties.push(coord);
+      else if (value === CELL_CLEAR) clears.push(coord);
     });
     const parts = [];
     if (fills.length) parts.push(`!fill ${fills.join(' ')}`);
     if (empties.length) parts.push(`!empty ${empties.join(' ')}`);
+    if (clears.length) parts.push(`!clear ${clears.join(' ')}`);
     return parts.join(' ');
   }
 
+  // Sends the given cells, splitting them into random-length messages only when
+  // the batch is larger than one message.
   function sendCellBlocks(cells) {
     if (!cells.length) return Promise.resolve();
     const messages = [];
-    for (let i = 0; i < cells.length; i += MAX_CELLS_PER_MESSAGE) {
-      const chunk = cells.slice(i, i + MAX_CELLS_PER_MESSAGE);
+    chunkCells(cells).forEach(chunk => {
       const msg = buildCellMessage(chunk);
-      if (!msg) continue;
+      if (!msg) return;
       messages.push(msg);
       chunk.forEach(({ coord, value }) => markCellSent(coord, value));
-    }
+    });
     if (!messages.length) return Promise.resolve();
     return guardedExport(() => {
       messages.forEach(msg => scheduleSend(msg));
     }).catch(error => console.error('Failed to send cell message:', error));
   }
 
+  // A finished grid has no untouched cells left: every cell is either filled or
+  // marked empty (unresolved cells stay CELL_EMPTY). The solving move then has to
+  // reach the bot right away, even when fewer than BLOCK_MIN cells are still
+  // waiting.
+  function gridIsSolved() {
+    return state.cellStates.every(row =>
+      row.every(value => value === CELL_FILLED || value === CELL_MARKED)
+    );
+  }
+
   // Called whenever a cell changes: queues it and, with auto-send on, sends a
-  // message as soon as MAX_CELLS_PER_MESSAGE cells are waiting.
+  // message once the random block target is reached — or straight away when that
+  // change completed the grid, which flushes the remaining cells as the final
+  // message.
   function maybeAutoSend() {
     refreshExportButton();
     if (!state.autosendEnabled) return;
-    if (state.pendingCells.length < MAX_CELLS_PER_MESSAGE) return;
-    const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+    if (!state.pendingCells.length) return;
+    const solved = gridIsSolved();
+    if (!solved && state.pendingCells.length < autoBlockTarget) return;
+    // Solved: send everything still waiting, split into blocks only if a large
+    // grid somehow accumulated more than one message worth of cells.
+    const cells = solved
+      ? state.pendingCells.splice(0)
+      : state.pendingCells.splice(0, autoBlockTarget);
+    randomizeBlockTarget();
     sendCellBlocks(cells);
     refreshExportButton();
   }
 
-  // Unified export button: acts on the next block of MAX_CELLS_PER_MESSAGE cells
-  // only. Each click moves on to the following block ("send" mode posts it to
-  // chat, "clipboard" mode copies it so it can be pasted manually).
+  // Unified export button: acts on the next block of randomly chosen cells
+  // (BLOCK_MIN..BLOCK_MAX) only. Each click moves on to the following block
+  // ("send" mode posts it to chat, "clipboard" mode copies it so it can be pasted
+  // manually).
   function exportPendingCells() {
     if (!state.pendingCells.length) return Promise.resolve();
-    const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+    const size = Math.min(state.pendingCells.length, randomBlockSize());
+    const cells = state.pendingCells.splice(0, size);
     refreshExportButton();
     if (state.exportAction === 'clipboard') {
       const msg = buildCellMessage(cells);
@@ -1056,8 +1362,8 @@
   }
 
   // "Reset export": forget what was sent and queue the whole grid again. With
-  // auto-send on it is sent in blocks of MAX_CELLS_PER_MESSAGE right away;
-  // otherwise the Export button sends/copies one block per click.
+  // auto-send on it is sent in random-sized blocks right away; otherwise the
+  // Export button sends/copies one block per click.
   function resetExport() {
     state.lastExported.clear();
     state.lastExportedWhite.clear();
@@ -1070,6 +1376,7 @@
       });
     });
     state.pendingCells = cells;
+    randomizeBlockTarget();
     refreshExportButton();
     if (!state.autosendEnabled) return Promise.resolve();
     state.pendingCells = [];
@@ -1284,16 +1591,11 @@
   function undoLastAction() {
     if (!state.moveHistory.length) return;
     const lastAction = state.moveHistory.pop();
-    lastAction.forEach(({ row, col, previous, newValue }) => {
-      const coord = coordFor(row, col);
-      if (newValue === CELL_FILLED) state.lastExported.delete(coord);
-      if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
-      const idx = pendingIndex(coord);
-      if (idx !== -1) state.pendingCells.splice(idx, 1);
+    lastAction.forEach(({ row, col, previous }) => {
       state.cellStates[row][col] = previous;
-      if ((previous === CELL_FILLED || previous === CELL_MARKED) && sentValueFor(coord) !== previous) {
-        state.pendingCells.push({ coord, value: previous });
-      }
+      // Same reconciliation as a normal edit: undo can also mean "clear the
+      // cell again" if it had already been announced to the bot.
+      applyPending(coordFor(row, col), previous);
     });
     refreshExportButton();
     createGrid();
@@ -1682,7 +1984,7 @@
     const { wrapper: autosendDiv } = createCheckboxOption({
       id: 'chk-autosend',
       checked: state.autosendEnabled,
-      label: 'Auto-send every 20 selected cells',
+      label: 'Auto-send in blocks of 15–24 selected cells',
       onChange: checked => {
         state.autosendEnabled = checked;
         state.uiConfig.autosendEnabled = state.autosendEnabled;
@@ -1702,8 +2004,8 @@
       label: 'When I click Export:',
       value: state.exportAction,
       options: [
-        { value: 'send', label: 'Send 20 cells to chat' },
-        { value: 'clipboard', label: 'Copy 20 cells to clipboard' }
+        { value: 'send', label: 'Send 15–24 cells to chat' },
+        { value: 'clipboard', label: 'Copy 15–24 cells to clipboard' }
       ],
       onChange: value => {
         state.exportAction = value;
@@ -2229,6 +2531,7 @@
     if (state.sendLoopTimer) clearInterval(state.sendLoopTimer);
     if (state.roiInterval) clearInterval(state.roiInterval);
     clearRenderHandle();
+    stopChatWatch();
 
     if (state.documentMouseMoveHandler) {
       document.removeEventListener('mousemove', state.documentMouseMoveHandler);
@@ -2249,6 +2552,8 @@
     state.activityBtnMonitorId = null;
     state.progressTimer = null;
     state.sendLoopTimer = null;
+    state.inflightSend = null;
+    state.chatBlockedUntil = 0;
     state.roiInterval = null;
     state.buttonContainer = null;
     state.documentMouseMoveHandler = null;

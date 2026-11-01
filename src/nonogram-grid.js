@@ -9,8 +9,46 @@ const COL_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 const CELL_EMPTY = 0;
 const CELL_FILLED = 1;
 const CELL_MARKED = 2;
-// run_540p.py accepts at most 20 cells per chat message (fill + empty combined).
-const MAX_CELLS_PER_MESSAGE = 20;
+// Outgoing-only value: the cell was already announced to the bot as filled or
+// empty and has since been erased locally, so the bot needs "!clear <cell>".
+// The bot counts cleared cells towards its per-message limit too.
+const CELL_CLEAR = 3;
+// run_540p.py accepts at most 25 cells per chat message (fill, empty and clear
+// combined — cleared cells count towards the limit too). Each message carries a
+// random number of cells in this range so blocks are never a fixed size.
+const BLOCK_MIN = 15;
+const BLOCK_MAX = 24;
+
+// Message length for the next block: a random count in [BLOCK_MIN, BLOCK_MAX],
+// so blocks are never a fixed size (20, 20, 20 …) and no two messages repeat the
+// same shape.
+function randomBlockSize() {
+  return BLOCK_MIN + Math.floor(Math.random() * (BLOCK_MAX - BLOCK_MIN + 1));
+}
+
+// With auto-send on, cells accumulate until this many are waiting; the target is
+// re-drawn after every sent block, which is what keeps the sizes varied.
+let autoBlockTarget = randomBlockSize();
+
+function randomizeBlockTarget() {
+  autoBlockTarget = randomBlockSize();
+}
+
+// Splits a batch into consecutive messages of random length. Only used when the
+// batch is bigger than one message (a whole-grid send, for instance) — a batch
+// that already fits is sent as-is, never cut in two.
+function chunkCells(cells) {
+  if (cells.length <= BLOCK_MAX) return [cells];
+  const chunks = [];
+  let i = 0;
+  while (i < cells.length) {
+    const remaining = cells.length - i;
+    const size = remaining <= BLOCK_MAX ? remaining : randomBlockSize();
+    chunks.push(cells.slice(i, i + size));
+    i += size;
+  }
+  return chunks;
+}
 
 function colLetter(index) {
   return COL_LETTERS[index];
@@ -38,6 +76,7 @@ export function initCells() {
   state.lastExported = new Set();
   state.lastExportedWhite = new Set();
   state.pendingCells = [];
+  randomizeBlockTarget();
   clearSendQueue();
   state.geometryCache = null;
   state.dirtyGrid = true;
@@ -175,14 +214,41 @@ function markCellSent(coord, value) {
   if (value === CELL_FILLED) {
     state.lastExportedWhite.delete(coord);
     state.lastExported.add(coord);
-  } else {
-    state.lastExported.delete(coord);
-    state.lastExportedWhite.add(coord);
+    return;
   }
+  state.lastExported.delete(coord);
+  if (value === CELL_MARKED) state.lastExportedWhite.add(coord);
+  else state.lastExportedWhite.delete(coord); // CELL_CLEAR: bot now has it blank
 }
 
 function pendingIndex(coord) {
   return state.pendingCells.findIndex(cell => cell.coord === coord);
+}
+
+// Reconciles the outgoing entry for one cell with its new local state, so each
+// cell is queued at most once and always with its latest value:
+//  - same as what the bot already knows -> nothing to send;
+//  - erased cell the bot knows as filled/empty -> outgoing "!clear";
+//  - filled/marked -> outgoing !fill / !empty.
+// A pending entry that changes state is overwritten in place, which is why a
+// clear that is turned back into a fill/empty is only sent once (final state).
+// Returns true when state.pendingCells changed.
+function applyPending(coord, value) {
+  const idx = pendingIndex(coord);
+  const sent = sentValueFor(coord);
+  const outgoing = value === sent ? null : (value === CELL_EMPTY ? CELL_CLEAR : value);
+  if (outgoing === null) {
+    if (idx === -1) return false;
+    state.pendingCells.splice(idx, 1);
+    return true;
+  }
+  if (idx !== -1) {
+    if (state.pendingCells[idx].value === outgoing) return false;
+    state.pendingCells[idx].value = outgoing;
+    return true;
+  }
+  state.pendingCells.push({ coord, value: outgoing });
+  return true;
 }
 
 export function refreshExportButton() {
@@ -191,78 +257,89 @@ export function refreshExportButton() {
   const waiting = state.pendingCells.length ? ` — ${state.pendingCells.length} waiting` : '';
   const verb = state.exportAction === 'clipboard' ? 'Copies' : 'Sends';
   const auto = state.autosendEnabled
-    ? `Auto-sends every ${MAX_CELLS_PER_MESSAGE} selected cells. `
+    ? `Auto-sends in blocks of ${BLOCK_MIN}–${BLOCK_MAX} selected cells. `
     : '';
-  btn.dataset.baseTitle = `${auto}${verb} up to ${MAX_CELLS_PER_MESSAGE} cells per click${waiting}`;
+  btn.dataset.baseTitle = `${auto}${verb} ${BLOCK_MIN}–${BLOCK_MAX} cells per click${waiting}`;
   btn.title = btn.dataset.baseTitle;
 }
 
 export function queueCell(row, col, value) {
-  const coord = coordFor(row, col);
-  const idx = pendingIndex(coord);
-  if (value === CELL_EMPTY) {
-    // Erasing an unsent cell just removes it from the outgoing list.
-    if (idx !== -1) state.pendingCells.splice(idx, 1);
-    return;
-  }
-  if (sentValueFor(coord) === value) {
-    if (idx !== -1) state.pendingCells.splice(idx, 1);
-    return;
-  }
-  if (idx !== -1) {
-    state.pendingCells[idx].value = value;
-  } else {
-    state.pendingCells.push({ coord, value });
-  }
+  applyPending(coordFor(row, col), value);
+  // Also refreshes the "waiting" count on the button.
   maybeAutoSend();
 }
 
 function buildCellMessage(cells) {
   const fills = [];
   const empties = [];
+  const clears = [];
   cells.forEach(({ coord, value }) => {
     if (value === CELL_FILLED) fills.push(coord);
     else if (value === CELL_MARKED) empties.push(coord);
+    else if (value === CELL_CLEAR) clears.push(coord);
   });
   const parts = [];
   if (fills.length) parts.push(`!fill ${fills.join(' ')}`);
   if (empties.length) parts.push(`!empty ${empties.join(' ')}`);
+  if (clears.length) parts.push(`!clear ${clears.join(' ')}`);
   return parts.join(' ');
 }
 
+// Sends the given cells, splitting them into random-length messages only when
+// the batch is larger than one message.
 function sendCellBlocks(cells) {
   if (!cells.length) return Promise.resolve();
   const messages = [];
-  for (let i = 0; i < cells.length; i += MAX_CELLS_PER_MESSAGE) {
-    const chunk = cells.slice(i, i + MAX_CELLS_PER_MESSAGE);
+  chunkCells(cells).forEach(chunk => {
     const msg = buildCellMessage(chunk);
-    if (!msg) continue;
+    if (!msg) return;
     messages.push(msg);
     chunk.forEach(({ coord, value }) => markCellSent(coord, value));
-  }
+  });
   if (!messages.length) return Promise.resolve();
   return guardedExport(() => {
     messages.forEach(msg => scheduleSend(msg));
   }).catch(error => console.error('Failed to send cell message:', error));
 }
 
+// A finished grid has no untouched cells left: every cell is either filled or
+// marked empty (unresolved cells stay CELL_EMPTY). The solving move then has to
+// reach the bot right away, even when fewer than BLOCK_MIN cells are still
+// waiting.
+function gridIsSolved() {
+  return state.cellStates.every(row =>
+    row.every(value => value === CELL_FILLED || value === CELL_MARKED)
+  );
+}
+
 // Called whenever a cell changes: queues it and, with auto-send on, sends a
-// message as soon as MAX_CELLS_PER_MESSAGE cells are waiting.
+// message once the random block target is reached — or straight away when that
+// change completed the grid, which flushes the remaining cells as the final
+// message.
 export function maybeAutoSend() {
   refreshExportButton();
   if (!state.autosendEnabled) return;
-  if (state.pendingCells.length < MAX_CELLS_PER_MESSAGE) return;
-  const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+  if (!state.pendingCells.length) return;
+  const solved = gridIsSolved();
+  if (!solved && state.pendingCells.length < autoBlockTarget) return;
+  // Solved: send everything still waiting, split into blocks only if a large
+  // grid somehow accumulated more than one message worth of cells.
+  const cells = solved
+    ? state.pendingCells.splice(0)
+    : state.pendingCells.splice(0, autoBlockTarget);
+  randomizeBlockTarget();
   sendCellBlocks(cells);
   refreshExportButton();
 }
 
-// Unified export button: acts on the next block of MAX_CELLS_PER_MESSAGE cells
-// only. Each click moves on to the following block ("send" mode posts it to
-// chat, "clipboard" mode copies it so it can be pasted manually).
+// Unified export button: acts on the next block of randomly chosen cells
+// (BLOCK_MIN..BLOCK_MAX) only. Each click moves on to the following block
+// ("send" mode posts it to chat, "clipboard" mode copies it so it can be pasted
+// manually).
 export function exportPendingCells() {
   if (!state.pendingCells.length) return Promise.resolve();
-  const cells = state.pendingCells.splice(0, MAX_CELLS_PER_MESSAGE);
+  const size = Math.min(state.pendingCells.length, randomBlockSize());
+  const cells = state.pendingCells.splice(0, size);
   refreshExportButton();
   if (state.exportAction === 'clipboard') {
     const msg = buildCellMessage(cells);
@@ -275,8 +352,8 @@ export function exportPendingCells() {
 }
 
 // "Reset export": forget what was sent and queue the whole grid again. With
-// auto-send on it is sent in blocks of MAX_CELLS_PER_MESSAGE right away;
-// otherwise the Export button sends/copies one block per click.
+// auto-send on it is sent in random-sized blocks right away; otherwise the
+// Export button sends/copies one block per click.
 export function resetExport() {
   state.lastExported.clear();
   state.lastExportedWhite.clear();
@@ -289,6 +366,7 @@ export function resetExport() {
     });
   });
   state.pendingCells = cells;
+  randomizeBlockTarget();
   refreshExportButton();
   if (!state.autosendEnabled) return Promise.resolve();
   state.pendingCells = [];
@@ -503,16 +581,11 @@ export function onCanvasMouseMove(e) {
 export function undoLastAction() {
   if (!state.moveHistory.length) return;
   const lastAction = state.moveHistory.pop();
-  lastAction.forEach(({ row, col, previous, newValue }) => {
-    const coord = coordFor(row, col);
-    if (newValue === CELL_FILLED) state.lastExported.delete(coord);
-    if (newValue === CELL_MARKED) state.lastExportedWhite.delete(coord);
-    const idx = pendingIndex(coord);
-    if (idx !== -1) state.pendingCells.splice(idx, 1);
+  lastAction.forEach(({ row, col, previous }) => {
     state.cellStates[row][col] = previous;
-    if ((previous === CELL_FILLED || previous === CELL_MARKED) && sentValueFor(coord) !== previous) {
-      state.pendingCells.push({ coord, value: previous });
-    }
+    // Same reconciliation as a normal edit: undo can also mean "clear the
+    // cell again" if it had already been announced to the bot.
+    applyPending(coordFor(row, col), previous);
   });
   refreshExportButton();
   createGrid();

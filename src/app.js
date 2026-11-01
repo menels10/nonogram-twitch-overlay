@@ -3,7 +3,7 @@ import { configureNonogramGrid, createGrid, initCells } from './nonogram-grid.js
 import { createMainButtons, render, setupCanvas, updateCanvasSize, minimizeCanvas, updateROI } from './overlay-ui.js';
 import { createControlAndStatus, createExtraConfigPanel, configureStatusControls } from './status-controls.js';
 import { state, clearRenderHandle, initState } from './state.js';
-import { ensureProgressLoop } from './twitch-chat.js';
+import { ensureProgressLoop, stopChatWatch } from './twitch-chat.js';
 import { cancelAutoRedeem } from './twitch-redeem.js';
 
 const readyCallbacks = [];
@@ -29,6 +29,7 @@ function cleanup() {
   if (state.roiInterval) clearInterval(state.roiInterval);
   cancelAutoRedeem();
   clearRenderHandle();
+  stopChatWatch();
 
   if (state.documentMouseMoveHandler) {
     document.removeEventListener('mousemove', state.documentMouseMoveHandler);
@@ -49,6 +50,8 @@ function cleanup() {
   state.activityBtnMonitorId = null;
   state.progressTimer = null;
   state.sendLoopTimer = null;
+  state.inflightSend = null;
+  state.chatBlockedUntil = 0;
   state.roiInterval = null;
   state.buttonContainer = null;
   state.documentMouseMoveHandler = null;

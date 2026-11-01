@@ -352,7 +352,7 @@ export function createExtraConfigPanel() {
   const { wrapper: autosendDiv } = createCheckboxOption({
     id: 'chk-autosend',
     checked: state.autosendEnabled,
-    label: 'Auto-send every 20 selected cells',
+    label: 'Auto-send in blocks of 15–24 selected cells',
     onChange: checked => {
       state.autosendEnabled = checked;
       state.uiConfig.autosendEnabled = state.autosendEnabled;
@@ -372,8 +372,8 @@ export function createExtraConfigPanel() {
     label: 'When I click Export:',
     value: state.exportAction,
     options: [
-      { value: 'send', label: 'Send 20 cells to chat' },
-      { value: 'clipboard', label: 'Copy 20 cells to clipboard' }
+      { value: 'send', label: 'Send 15–24 cells to chat' },
+      { value: 'clipboard', label: 'Copy 15–24 cells to clipboard' }
     ],
     onChange: value => {
       state.exportAction = value;
