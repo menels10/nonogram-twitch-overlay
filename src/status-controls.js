@@ -12,7 +12,7 @@ import {
   refreshExportButton,
   resetSizeDefaults
 } from './nonogram-grid.js';
-import { ensureProgressLoop, ensureSendLoop, sendMessageWithEvent, stopProgressLoop } from './twitch-chat.js';
+import { ensureProgressLoop, ensureSendLoop, scheduleSend, setSubscriberMode, stopProgressLoop } from './twitch-chat.js';
 
 const MINIMIZE_BUTTON_STYLE = {
   position: 'absolute',
@@ -33,9 +33,10 @@ const MINIMIZE_BUTTON_STYLE = {
   color: 'black'
 };
 
-function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px' }) {
+function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px', title = '' }) {
   const wrapper = document.createElement('div');
   wrapper.style.marginTop = marginTop;
+  if (title) wrapper.title = title;
 
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
@@ -47,6 +48,7 @@ function createCheckboxOption({ id, checked, label, onChange, marginTop = '8px' 
   const labelElement = document.createElement('label');
   labelElement.htmlFor = id;
   labelElement.textContent = label;
+  if (title) labelElement.title = title;
 
   wrapper.appendChild(checkbox);
   wrapper.appendChild(labelElement);
@@ -420,8 +422,25 @@ export function createExtraConfigPanel() {
     }
   });
 
+  const { wrapper: subscriberDiv } = createCheckboxOption({
+    id: 'chk-subscriber',
+    checked: state.subscriberMode,
+    label: 'Subscriber: separate cooldowns per command',
+    title:
+      'Subscribers bypass Twitch slow mode. With this on, darts and nonogram ' +
+      'exports each get their own 10s cooldown, so a dart does not delay the ' +
+      'next cell block (and vice versa), and tamagotchi commands are never ' +
+      'delayed. Leave it off if the channel throttles your messages anyway.',
+    onChange: checked => {
+      setSubscriberMode(checked);
+      state.uiConfig.subscriberMode = state.subscriberMode;
+      saveUIConfig();
+    }
+  });
+
   panel.appendChild(autosendDiv);
   panel.appendChild(exportActionDiv);
+  panel.appendChild(subscriberDiv);
   panel.appendChild(guardDiv);
   panel.appendChild(minDiv);
   panel.appendChild(blueDiv);
@@ -490,8 +509,11 @@ export function createStatusContainer() {
       if (!group.length) return;
       const base = group[Math.floor(Math.random() * group.length)];
       const cmd = randomizeCaps(base);
+      // Goes through the same queue as nonogram cells and darts, so a tamagotchi
+      // command starts the chat cooldown like everything else (and waits for it
+      // when one is running) instead of bypassing the pacing entirely.
       try {
-        sendMessageWithEvent(cmd);
+        scheduleSend(cmd);
       } catch (e) {
         console.error('Failed to send status command:', e);
       }

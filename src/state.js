@@ -7,7 +7,8 @@ const DEFAULT_UI_CONFIG = {
     sharpeningEnabled: false,
     autosendEnabled: false,
     exportAction: 'send',
-    guardExport: false
+    guardExport: false,
+    subscriberMode: false
   };
 
 export const state = {
@@ -51,7 +52,15 @@ export const state = {
   geometryCache: null,
   lastDartExportIndex: 1,
   COOLDOWN_MS: 10_000,
+  // Single chat cooldown (default): every message, whatever its command, waits
+  // for it and restarts it — Twitch slow mode is per account, not per command.
   nextSendAt: 0,
+  // Subscriber mode: one cooldown per command group instead of one shared slot.
+  // `other` (tamagotchi / manual commands) is never throttled there.
+  nextSendAtByKind: { cells: 0, darts: 0, other: 0 },
+  subscriberMode: false,
+  // Set when the chat component cannot be resolved; blocks every category.
+  chatUnavailableUntil: 0,
   sendQueue: [],
   inflightSend: null,
   sendAttempts: 0,
@@ -105,6 +114,7 @@ export function initState() {
   state.sharpeningEnabled = state.uiConfig.sharpeningEnabled;
   state.guardExport = state.uiConfig.guardExport;
   state.autosendEnabled = state.uiConfig.autosendEnabled ?? false;
+  state.subscriberMode = state.uiConfig.subscriberMode === true;
   state.exportAction = state.uiConfig.exportAction === 'clipboard' ? 'clipboard' : 'send';
 }
 

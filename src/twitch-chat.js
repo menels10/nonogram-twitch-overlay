@@ -1,5 +1,5 @@
 // Integrates with Twitch chat: paced queue, delivery confirmation, rate-limit
-// recovery, and cooldown tracking shared by nonogram and dart messages.
+// recovery, and cooldown tracking shared by nonogram, darts and tamagotchi.
 import { state } from './state.js';
 
 // Twitch explains a rejected message as short text next to the chat input
@@ -23,6 +23,75 @@ const SEND_CONFIRM_MS = 2500;
 const RETRY_DELAY_MS = 5_000;
 // Retry delay when the chat component could not be found at all.
 const NO_CHAT_RETRY_MS = 5_000;
+
+// Message groups. By default every group shares one 10s chat cooldown (Twitch
+// slow mode is per account), so any message blocks the next one. In subscriber
+// mode each group keeps its own cooldown, which lets a dart slip in between two
+// nonogram blocks, and tamagotchi commands are not throttled at all.
+export const KIND_CELLS = 'cells';
+export const KIND_DARTS = 'darts';
+export const KIND_OTHER = 'other';
+
+export function messageKind(message) {
+  const text = String(message ?? '').trim();
+  if (/^!darts(?![a-z0-9_])/i.test(text)) return KIND_DARTS;
+  if (/^!(?:fill|empty|clear)(?![a-z0-9_])/i.test(text)) return KIND_CELLS;
+  return KIND_OTHER;
+}
+
+// When the next message of a group may go out. Default mode ignores the group
+// entirely (one shared slot); subscriber mode keeps the groups apart.
+function laneEnd(kind) {
+  if (!state.subscriberMode) return state.nextSendAt;
+  if (kind === KIND_OTHER) return 0;
+  return state.nextSendAtByKind[kind] || 0;
+}
+
+function laneReadyAt(kind) {
+  return Math.max(laneEnd(kind), state.chatUnavailableUntil || 0);
+}
+
+// Pushes a group's cooldown forward. Never pulls it back: an external message or
+// a rejection can both happen while a longer wait is already running.
+function extendLane(kind, until) {
+  if (!(until > 0)) return;
+  if (state.subscriberMode) {
+    if (kind === KIND_OTHER) return; // subscriber mode: tamagotchi never waits
+    const current = state.nextSendAtByKind[kind] || 0;
+    if (until > current) state.nextSendAtByKind[kind] = until;
+    state.nextSendAt = Math.max(
+      state.nextSendAtByKind[KIND_CELLS] || 0,
+      state.nextSendAtByKind[KIND_DARTS] || 0
+    );
+    return;
+  }
+  if (until > state.nextSendAt) state.nextSendAt = until;
+}
+
+// Switching modes must never shorten a wait that is already running, so the new
+// grouping starts from the longer of the two.
+export function setSubscriberMode(enabled) {
+  const want = !!enabled;
+  if (want === state.subscriberMode) return;
+  if (want) {
+    [KIND_CELLS, KIND_DARTS].forEach(kind => {
+      state.nextSendAtByKind[kind] = Math.max(state.nextSendAtByKind[kind] || 0, state.nextSendAt);
+    });
+    state.nextSendAt = Math.max(
+      state.nextSendAtByKind[KIND_CELLS],
+      state.nextSendAtByKind[KIND_DARTS]
+    );
+  } else {
+    state.nextSendAt = Math.max(
+      state.nextSendAt,
+      state.nextSendAtByKind[KIND_CELLS] || 0,
+      state.nextSendAtByKind[KIND_DARTS] || 0
+    );
+    state.nextSendAtByKind = { [KIND_CELLS]: 0, [KIND_DARTS]: 0, [KIND_OTHER]: 0 };
+  }
+  state.subscriberMode = want;
+  updateCooldownUI();
+}
 
 let chatWatchAttached = false;
 
@@ -137,7 +206,8 @@ export function stopProgressLoop() {
 
 // One step of the send queue. Messages are only removed once Twitch did not
 // answer with a rate-limit error, so a blocked block is retried instead of
-// being dropped (and later blocks never overtake it).
+// being dropped (and later blocks never overtake it — except tamagotchi
+// commands, which are picked first so a pet does not wait behind a grid).
 export function processSendQueue(now = Date.now()) {
   const inflight = state.inflightSend;
 
@@ -149,11 +219,11 @@ export function processSendQueue(now = Date.now()) {
     }
   }
 
-  if (!state.inflightSend && state.sendQueue.length && now >= state.nextSendAt) {
+  if (!state.inflightSend && state.sendQueue.length) {
     startSend(now);
   }
 
-  if (!state.inflightSend && !state.sendQueue.length && now >= state.nextSendAt) {
+  if (!state.inflightSend && !state.sendQueue.length) {
     if (state.sendLoopTimer) {
       clearInterval(state.sendLoopTimer);
       state.sendLoopTimer = null;
@@ -163,36 +233,82 @@ export function processSendQueue(now = Date.now()) {
   updateCooldownUI(now);
 }
 
+// Index of the next message that may go out right now, or -1. Click-driven
+// commands (darts, tamagotchi) are preferred over queued coordinate blocks: they
+// are one-shot actions, so they take the next free slot instead of waiting
+// behind a pile of blocks. They still obey their cooldown exactly like the rest.
+function isExpressKind(kind) {
+  return kind === KIND_DARTS || kind === KIND_OTHER;
+}
+
+function pickSendable(now) {
+  for (let i = 0; i < state.sendQueue.length; i++) {
+    const kind = messageKind(state.sendQueue[i]);
+    if (isExpressKind(kind) && now >= laneReadyAt(kind)) return i;
+  }
+  for (let i = 0; i < state.sendQueue.length; i++) {
+    if (now >= laneReadyAt(messageKind(state.sendQueue[i]))) return i;
+  }
+  return -1;
+}
+
 function startSend(now) {
-  const msg = state.sendQueue[0];
+  const index = pickSendable(now);
+  if (index < 0) return;
+  const msg = state.sendQueue[index];
   if (!sendMessageWithEvent(msg)) {
-    // Chat not found yet: keep the message queued and try again shortly.
-    state.nextSendAt = now + NO_CHAT_RETRY_MS;
+    // Chat not found yet: keep the message queued and try again shortly. This is
+    // not a per-command problem, so it delays every group.
+    state.chatUnavailableUntil = now + NO_CHAT_RETRY_MS;
     return;
   }
-  state.inflightSend = { msg, at: now };
+  state.chatUnavailableUntil = 0;
+  state.inflightSend = { msg, at: now, index };
+}
+
+function removeInflightMessage(inflight) {
+  if (!inflight) return;
+  if (state.sendQueue[inflight.index] === inflight.msg) {
+    state.sendQueue.splice(inflight.index, 1);
+    return;
+  }
+  const at = state.sendQueue.indexOf(inflight.msg);
+  if (at >= 0) state.sendQueue.splice(at, 1);
 }
 
 function completeInflight(now) {
+  const inflight = state.inflightSend;
+  const kind = messageKind(inflight?.msg);
   state.inflightSend = null;
-  if (state.sendQueue.length) state.sendQueue.shift();
+  removeInflightMessage(inflight);
   state.sendAttempts = 0;
   state.chatBlockedUntil = 0;
-  state.nextSendAt = now + state.COOLDOWN_MS;
+  extendLane(kind, now + state.COOLDOWN_MS);
 }
 
 function failInflight(now) {
   const blocked = state.inflightSend?.msg;
+  const kind = messageKind(blocked);
   state.inflightSend = null;
   state.sendAttempts += 1;
-  state.nextSendAt = now + RETRY_DELAY_MS;
-  state.chatBlockedUntil = state.nextSendAt;
+  const retryAt = now + RETRY_DELAY_MS;
+  // extendLane keeps a longer wait that is already running (for example the
+  // cooldown started by a tamagotchi command a moment ago) instead of
+  // shortening it to 5s.
+  extendLane(kind, retryAt);
+  state.chatBlockedUntil = Math.max(retryAt, laneEnd(kind));
   const log = state.sendAttempts === 1 ? console.warn : console.log;
   log(
     `[Nonogram] Twitch rejected "${truncate(blocked)}" (attempt ${state.sendAttempts}, ` +
     `slow mode or rate limit); retrying in ${Math.round(RETRY_DELAY_MS / 1000)}s. Pending messages:`,
     state.sendQueue
   );
+  if (state.subscriberMode) {
+    console.warn(
+      '[Nonogram] A message was refused while subscriber mode is on — slow mode may still apply. ' +
+      'Turn the option off if the channel throttles your messages anyway.'
+    );
+  }
 }
 
 // Twitch renders its "too quickly" / slow mode notice as short text near the
@@ -298,61 +414,71 @@ function handleChatClick(event) {
 }
 
 // Any other message the user sends (darts, tamagotchi, manual commands) takes
-// the chat slot: it only delays the nonogram queue, it never starts or drains it.
+// the chat slot: it delays the queued messages, but never starts or drains the
+// queue. In subscriber mode it only delays its own group, and tamagotchi / other
+// commands do not delay anything.
 export function noteExternalSend(text = '', now = Date.now()) {
   state.lastExternalSendAt = now;
-  const until = now + state.COOLDOWN_MS;
-  if (until > state.nextSendAt) state.nextSendAt = until;
+  const kind = messageKind(text);
+  extendLane(kind, now + state.COOLDOWN_MS);
 
   if (state.inflightSend || state.sendQueue.length) {
-    console.log(
-      `[Nonogram] Chat message "${truncate(text)}" sent outside the overlay — ` +
-      `waiting ${Math.round(state.COOLDOWN_MS / 1000)}s before the next queued message.`
-    );
+    const scope = !state.subscriberMode
+      ? `waiting ${Math.round(state.COOLDOWN_MS / 1000)}s before the next queued message.`
+      : kind === KIND_OTHER
+        ? 'subscriber mode: tamagotchi/manual messages do not delay the queue.'
+        : `waiting ${Math.round(state.COOLDOWN_MS / 1000)}s before the next ${kind} message.`;
+    console.log(`[Nonogram] Chat message "${truncate(text)}" sent outside the overlay — ${scope}`);
   }
   updateCooldownUI(now);
 }
 
-function cooldownProgress01(now) {
-  if (now < state.nextSendAt) return 1 - (state.nextSendAt - now) / state.COOLDOWN_MS;
-  return 1;
+function cooldownProgress01(end, now) {
+  if (now >= end) return 1;
+  return 1 - (end - now) / state.COOLDOWN_MS;
+}
+
+function buttonStateTitle(end, now) {
+  const remain = Math.max(0, end - now);
+  const seconds = Math.ceil(remain / 1000);
+  if (state.chatBlockedUntil > now) {
+    return `Twitch blocked the message — retry in ${seconds}s (${state.sendQueue.length} queued)`;
+  }
+  if (state.inflightSend) return 'Sending…';
+  if (remain > 0) return `Cooldown: ${seconds}s`;
+  if (state.sendQueue.length) return `Sending (${state.sendQueue.length} left)`;
+  return 'Ready';
+}
+
+function setButtonReady(btn, ready) {
+  if (!btn) return;
+  btn.disabled = !ready;
+  btn.style.opacity = ready ? '1' : '0.7';
+  btn.style.cursor = ready ? 'pointer' : 'not-allowed';
 }
 
 export function updateCooldownUI(now = Date.now()) {
   if (!state.exportBtn && !state.exportDartBtn) return;
-  const p = cooldownProgress01(now);
   const busy = !!state.inflightSend;
-  const ready = now >= state.nextSendAt && state.sendQueue.length === 0 && !busy;
-  [state.exportBtn, state.exportDartBtn].forEach(btn => {
-    if (!btn) return;
-    btn.disabled = !ready;
-    btn.style.opacity = ready ? '1' : '0.7';
-    btn.style.cursor = ready ? 'pointer' : 'not-allowed';
-  });
-  setBtnProgress(state.exportBtn, p);
+  const idle = !busy && state.sendQueue.length === 0;
+  const cellsEnd = laneReadyAt(KIND_CELLS);
+  const dartsEnd = laneReadyAt(KIND_DARTS);
 
-  const remain = Math.max(0, state.nextSendAt - now);
-  const seconds = Math.ceil(remain / 1000);
-  let title;
-  if (state.chatBlockedUntil > now) {
-    title = `Twitch blocked the message — retry in ${seconds}s (${state.sendQueue.length} queued)`;
-  } else if (busy) {
-    title = 'Sending…';
-  } else if (remain > 0) {
-    title = `Cooldown: ${seconds}s`;
-  } else if (state.sendQueue.length) {
-    title = `Sending (${state.sendQueue.length} left)`;
-  } else {
-    title = 'Ready';
-  }
+  // Each button shows the cooldown of its own command group, so in subscriber
+  // mode the dart button can be ready while the cells are still cooling down.
+  setButtonReady(state.exportBtn, idle && now >= cellsEnd);
+  setButtonReady(state.exportDartBtn, idle && now >= dartsEnd);
+  setBtnProgress(state.exportBtn, cooldownProgress01(cellsEnd, now));
+  setBtnProgress(state.exportDartBtn, cooldownProgress01(dartsEnd, now));
 
   if (state.exportBtn) {
+    const title = buttonStateTitle(cellsEnd, now);
     const base = state.exportBtn.dataset.baseTitle;
     state.exportBtn.title = base ? `${title} — ${base}` : title;
   }
-  if (state.exportDartBtn) state.exportDartBtn.title = title;
+  if (state.exportDartBtn) state.exportDartBtn.title = buttonStateTitle(dartsEnd, now);
 
-  if (state.sendQueue.length === 0 && !busy && now >= state.nextSendAt) {
+  if (state.sendQueue.length === 0 && !busy && now >= Math.max(cellsEnd, dartsEnd)) {
     stopProgressLoop();
   } else {
     // Keeps the countdown running (and the buttons disabled) until the chat

@@ -62,9 +62,15 @@ Right-click: Toggle white mark (×). A second click clears it.
 Changing grid size or column clue count clears the cells waiting to be sent.
 
 ⏱️ Chat pacing and rate limits
-Messages are sent one at a time with a 10 second gap. A message only leaves the queue once Twitch did not reject it. If Twitch refuses it — slow mode ("This chat is running in slow mode. You’re sending messages too quickly.") or a plain "You are sending messages too quickly." — the same message stays at the front of the queue and is retried every 5 seconds until it goes through. Later coordinate blocks never jump ahead of it, and nothing has to be copied from chat by hand.
+Messages are sent one at a time with a 10 second gap. A message only leaves the queue once Twitch did not reject it. If Twitch refuses it — slow mode ("This chat is running in slow mode. You’re sending messages too quickly.") or a plain "You are sending messages too quickly." — the same message stays at the front of the queue and is retried every 5 seconds until it goes through. Later coordinate blocks never jump ahead of it, and nothing has to be copied from chat by hand. A retry never shortens a cooldown that is already running: if a fresh message just reset the 10 second window, the retry waits for that window to end instead of firing 5 seconds later and being rejected again.
 
-Any other message you send yourself in chat — `!darts`, tamagotchi commands, anything typed or sent with the chat button — is detected and counts as the chat slot: it delays the nonogram queue for one cooldown but never queues, starts or flushes nonogram messages.
+Every message shares that cooldown by default, because Twitch's slow mode is per account, not per command. `!fill`/`!empty`/`!clear`, the dart button and the tamagotchi buttons all wait for the same 10 seconds and all restart it — a tamagotchi click delays the next cell block exactly like an export delays a dart. Tamagotchi commands do jump the queue (they are one-shot actions, so they go out at the next free slot rather than behind a pile of blocks), but they never bypass the cooldown.
+
+A tamagotchi click used to be sent straight to chat, outside the queue. It now goes through the same queue as everything else, so it is paced and confirmed like the rest.
+
+"Subscriber: separate cooldowns per command" (⚙️ Config): subscribers bypass Twitch slow mode, so with this on the overlay keeps two independent 10 second cooldowns — one for nonogram exports, one for darts. A dart no longer delays the next cell block and vice versa, while two exports are still 10 seconds apart, and the darts still respect the bot's own 10 second dart cooldown. Tamagotchi messages are never delayed and never delay anything in this mode. Leave it off if the channel throttles your messages anyway (or if you are not a subscriber) — the overlay warns in the console if Twitch rejects a message in this mode.
+
+Any other message you send yourself in chat — typed or sent with the chat button — is detected and counts as the chat slot: it delays the queue for one cooldown but never queues, starts or flushes nonogram messages.
 
 While Twitch is blocking, the Export button tooltip shows `Twitch blocked the message — retry in Ns (N queued)`.
 
