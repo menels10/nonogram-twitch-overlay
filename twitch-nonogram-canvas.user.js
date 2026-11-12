@@ -1526,7 +1526,7 @@
       const col = colLetter(c);
       ranges.push(`${col}1-${col}${state.size}`);
     }
-    const clearCmd = `!clear ${ranges.join(',')}`;
+    const clearCmd = `!clear all`;
     safeClipboardWrite(clearCmd);
   }
 
